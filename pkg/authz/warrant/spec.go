@@ -253,3 +253,28 @@ type WarrantApp struct {
 	WarrantUserCount int    `json:"warrantUserCount" postgres:"warrant_user_count"`
 	WarrantOrgCount  int    `json:"warrantOrgCount"  postgres:"warrant_org_count"`
 }
+
+type CommonResponse struct {
+	ver    int
+	status int
+	reason string
+	body   interface{}
+}
+
+func NewSuccessCommonResponse(body interface{}) *CommonResponse {
+	return &CommonResponse{
+		ver:    1,
+		status: 200,
+		reason: "OK",
+		body:   body,
+	}
+}
+
+func NewSuccessEmptyResponse() *CommonResponse {
+	return &CommonResponse{
+		ver:    1,
+		status: 200,
+		reason: "OK",
+		body:   struct{}{},
+	}
+}

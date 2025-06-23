@@ -194,8 +194,7 @@ func batchDeleteHandler(svc WarrantService, w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	w.Header().Set("Content-type", "application/json")
-	w.WriteHeader(http.StatusOK)
+	service.SendJSONResponse(w, NewSuccessEmptyResponse())
 	return nil
 }
 
@@ -211,8 +210,7 @@ func deleteHandler(svc WarrantService, w http.ResponseWriter, r *http.Request) e
 		return err
 	}
 
-	w.Header().Set("Content-type", "application/json")
-	w.WriteHeader(http.StatusOK)
+	service.SendJSONResponse(w, NewSuccessEmptyResponse())
 	return nil
 }
 
