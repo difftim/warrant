@@ -255,26 +255,26 @@ type WarrantApp struct {
 }
 
 type CommonResponse struct {
-	ver    int
-	status int
-	reason string
-	body   interface{}
+	Ver    int
+	Status int
+	Reason string
+	Body   interface{}
 }
 
 func NewSuccessCommonResponse(body interface{}) *CommonResponse {
 	return &CommonResponse{
-		ver:    1,
-		status: 200,
-		reason: "OK",
-		body:   body,
+		Ver:    1,
+		Status: 200,
+		Reason: "OK",
+		Body:   body,
 	}
 }
 
 func NewSuccessEmptyResponse() *CommonResponse {
 	return &CommonResponse{
-		ver:    1,
-		status: 200,
-		reason: "OK",
-		body:   struct{}{},
+		Ver:    1,
+		Status: 200,
+		Reason: "OK",
+		Body:   struct{}{},
 	}
 }
