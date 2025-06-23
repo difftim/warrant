@@ -24,6 +24,7 @@ import (
 )
 
 const Wildcard = "*"
+const MaxDeleteCountLimit int = 500
 
 type WarrantSpec struct {
 	ObjectType string            `json:"objectType"`
@@ -159,6 +160,10 @@ func (spec CreateWarrantSpec) String() string {
 	return str
 }
 
+type BatchDeleteWarrantSpec struct {
+	Warrants []DeleteWarrantSpec `json:"warrants" validate:"min=1,dive"`
+}
+
 type DeleteWarrantSpec struct {
 	ObjectType string            `json:"objectType,omitempty"        validate:"valid_object_type"`
 	ObjectId   string            `json:"objectId,omitempty"          validate:"valid_object_id"`
@@ -166,6 +171,19 @@ type DeleteWarrantSpec struct {
 	Subject    *SubjectSpec      `json:"subject,omitempty"`
 	Context    map[string]string `json:"context,omitempty" validate:"excluded_with=Policy"`
 	Policy     Policy            `json:"policy,omitempty"  validate:"excluded_with=Context"`
+}
+
+func (spec DeleteWarrantSpec) HasAnyValue() bool {
+	if spec.ObjectType != "" {
+		return true
+	}
+	if spec.ObjectId != "" {
+		return true
+	}
+	if spec.Subject != nil && spec.Subject.HasAnyValue() {
+		return true
+	}
+	return false
 }
 
 func (spec DeleteWarrantSpec) ToWarrant() (*Warrant, error) {
@@ -234,4 +252,29 @@ type WarrantApp struct {
 	AppId            string `json:"appId" postgres:"object_id"`
 	WarrantUserCount int    `json:"warrantUserCount" postgres:"warrant_user_count"`
 	WarrantOrgCount  int    `json:"warrantOrgCount"  postgres:"warrant_org_count"`
+}
+
+type CommonResponse struct {
+	ver    int
+	status int
+	reason string
+	body   interface{}
+}
+
+func NewSuccessCommonResponse(body interface{}) *CommonResponse {
+	return &CommonResponse{
+		ver:    1,
+		status: 200,
+		reason: "OK",
+		body:   body,
+	}
+}
+
+func NewSuccessEmptyResponse() *CommonResponse {
+	return &CommonResponse{
+		ver:    1,
+		status: 200,
+		reason: "OK",
+		body:   struct{}{},
+	}
 }
