@@ -216,7 +216,7 @@ func deleteHandler(svc WarrantService, w http.ResponseWriter, r *http.Request) e
 
 func deleteOneWarrant(svc WarrantService, context context.Context, spec DeleteWarrantSpec) error {
 	if !spec.HasAnyValue() {
-		return service.NewInvalidParameterError("objectType", "must specify at least one of objectType or objectId or Subject")
+		return service.NewInvalidParameterError("deleteParams", "must specify at least one of objectType or objectId or Subject")
 	}
 
 	_, err := svc.Delete(context, spec)
