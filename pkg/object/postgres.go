@@ -206,7 +206,7 @@ func (repo PostgresRepository) List(ctx context.Context, filterOptions *FilterOp
 		WHERE
 			deleted_at IS NULL
 	`
-	query = fmt.Sprintf("%s AND org_id = %s", query, orgId)
+	query = fmt.Sprintf("%s AND org_id = '%s'", query, orgId)
 
 	replacements := []interface{}{}
 	primaryKeyColumn := sortRegexp.ReplaceAllString(PrimarySortKey, `_$1`)
