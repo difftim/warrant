@@ -497,3 +497,7 @@ func (repo SQLiteRepository) DeleteWarrantsMatchingSubject(ctx context.Context, 
 
 	return nil
 }
+
+func (repo SQLiteRepository) GetPolicyGroupWarrantCount(ctx context.Context, objectIds []string) (map[string]PolicyGroupObjectCount, error) {
+	return nil, nil
+}

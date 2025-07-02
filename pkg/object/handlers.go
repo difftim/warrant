@@ -15,6 +15,7 @@
 package object
 
 import (
+	authz "github.com/warrant-dev/warrant/pkg/authz/objecttype"
 	"net/http"
 	"net/url"
 
@@ -50,6 +51,15 @@ func (svc ObjectService) Routes() ([]service.Route, error) {
 			Method:  "GET",
 			Handler: service.ChainMiddleware(
 				service.NewRouteHandler(svc, listHandlerV2),
+				service.ListMiddleware[ObjectListParamParser],
+			),
+		},
+
+		service.WarrantRoute{
+			Pattern: "/mgmt/policyGroup/list",
+			Method:  "GET",
+			Handler: service.ChainMiddleware(
+				service.NewRouteHandler(svc, listPolicyGroup),
 				service.ListMiddleware[ObjectListParamParser],
 			),
 		},
@@ -151,6 +161,21 @@ func listHandlerV2(svc ObjectService, w http.ResponseWriter, r *http.Request) er
 	}
 
 	service.SendJSONResponse(w, ListObjectsSpecV2{
+		Results:    objects,
+		PrevCursor: prevCursor,
+		NextCursor: nextCursor,
+	})
+	return nil
+}
+
+func listPolicyGroup(svc ObjectService, w http.ResponseWriter, r *http.Request) error {
+	listParams := service.GetListParamsFromContext[ObjectListParamParser](r.Context())
+	filterOptions := FilterOptions{ObjectType: authz.ObjectTypePolicyGroup}
+	objects, prevCursor, nextCursor, err := svc.ListPolicyGroup(r.Context(), &filterOptions, listParams)
+	if err != nil {
+		return err
+	}
+	service.SendJSONResponse(w, PolicyGroupListSpec{
 		Results:    objects,
 		PrevCursor: prevCursor,
 		NextCursor: nextCursor,

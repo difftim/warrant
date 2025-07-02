@@ -472,3 +472,7 @@ func (repo MySQLRepository) DeleteWarrantsMatchingSubject(ctx context.Context, s
 
 	return nil
 }
+
+func (repo MySQLRepository) GetPolicyGroupWarrantCount(ctx context.Context, objectIds []string) (map[string]PolicyGroupObjectCount, error) {
+	return nil, nil
+}

@@ -31,6 +31,7 @@ type Service interface {
 	List(ctx context.Context, filterOptions *FilterOptions, listParams service.ListParams) ([]ObjectSpec, *service.Cursor, *service.Cursor, error)
 	UpdateByObjectTypeAndId(ctx context.Context, objectType string, objectId string, updateSpec UpdateObjectSpec) (*ObjectSpec, error)
 	DeleteByObjectTypeAndId(ctx context.Context, objectType string, objectId string) (*wookie.Token, error)
+	ListPolicyGroup(ctx context.Context, filterOptions *FilterOptions, listParams service.ListParams) ([]PolicyGroupObjectSpec, *service.Cursor, *service.Cursor, error)
 }
 
 type ObjectService struct {
@@ -195,4 +196,38 @@ func (svc ObjectService) DeleteByObjectTypeAndId(ctx context.Context, objectType
 
 	//nolint:nilnil
 	return nil, nil
+}
+
+func (svc ObjectService) ListPolicyGroup(ctx context.Context, filterOptions *FilterOptions, listParams service.ListParams) ([]PolicyGroupObjectSpec, *service.Cursor, *service.Cursor, error) {
+	objectSpecs, preCursor, nextCursor, err := svc.List(ctx, filterOptions, listParams)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if len(objectSpecs) == 0 {
+		return nil, nil, nil, nil
+	}
+	objectIds := make([]string, 0)
+	for _, object := range objectSpecs {
+		objectIds = append(objectIds, object.ObjectId)
+	}
+	policyGroupWarrantCounts, err := svc.repository.GetPolicyGroupWarrantCount(ctx, objectIds)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	policyGroupObjectSpecs := make([]PolicyGroupObjectSpec, 0)
+	for _, object := range objectSpecs {
+		policyGroupObjectSpec := PolicyGroupObjectSpec{
+			ObjectSpec: object,
+			UserCount:  0,
+			AppCount:   0,
+		}
+		if policyGroupWarrantCounts != nil {
+			if counts, ok := policyGroupWarrantCounts[object.ObjectId]; ok {
+				policyGroupObjectSpec.UserCount = counts.UserCount
+				policyGroupObjectSpec.AppCount = counts.AppCount
+			}
+		}
+		policyGroupObjectSpecs = append(policyGroupObjectSpecs, policyGroupObjectSpec)
+	}
+	return policyGroupObjectSpecs, preCursor, nextCursor, nil
 }
