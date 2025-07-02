@@ -113,8 +113,8 @@ func (object Object) ToObjectSpec() (*ObjectSpec, error) {
 }
 
 type PolicyGroupWarrantCount struct {
-	PolicyGroupId string `postgres:"policyGroupId" sqlite:"policyGroupId" mysql:"policyGroupId"`
-	WarrantCount  int    `postgres:"warrantCount"         sqlite:"warrantCount"         mysql:"warrantCount"`
+	PolicyGroupId string `postgres:"policy_group_Id" sqlite:"policy_group_Id" mysql:"policy_group_Id"`
+	WarrantCount  int    `postgres:"warrant_count"         sqlite:"warrant_count"         mysql:"warrant_count"`
 }
 type PolicyGroupObjectCount struct {
 	ObjectId  string
