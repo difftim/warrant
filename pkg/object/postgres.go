@@ -601,7 +601,7 @@ func (repo PostgresRepository) GetPolicyGroupWarrantCount(ctx context.Context, o
 func (repo PostgresRepository) selectPolicyGroupWarrantAppCount(ctx context.Context, objectIds []string, orgId any) (warrantAppCounts []PolicyGroupWarrantCount, err error) {
 	query := `
 		SELECT
-			subject_id as policy_group_Id,
+			subject_id as policy_group_id,
 			count(distinct object_id) as warrant_count
 		FROM warrant
 		WHERE deleted_at IS NULL
@@ -613,7 +613,7 @@ func (repo PostgresRepository) selectPolicyGroupWarrantAppCount(ctx context.Cont
 	if orgId != nil && orgId != "" {
 		query = fmt.Sprintf("%s AND org_id = '%s'", query, orgId)
 	}
-	query += " group by policy_group_Id "
+	query += " group by policy_group_id "
 	err = repo.DB.SelectContext(
 		ctx,
 		&warrantAppCounts,
@@ -629,7 +629,7 @@ func (repo PostgresRepository) selectPolicyGroupWarrantAppCount(ctx context.Cont
 func (repo PostgresRepository) selectPolicyGroupWarrantUserCount(ctx context.Context, objectIds []string, orgId any) (warrantUserCounts []PolicyGroupWarrantCount, err error) {
 	query := `
 		SELECT
-			object_id as policy_group_Id,
+			object_id as policy_group_id,
 			count(distinct subject_id) as warrant_count
 		FROM warrant
 		WHERE deleted_at IS NULL
@@ -641,7 +641,7 @@ func (repo PostgresRepository) selectPolicyGroupWarrantUserCount(ctx context.Con
 	if orgId != nil && orgId != "" {
 		query = fmt.Sprintf("%s AND org_id = '%s'", query, orgId)
 	}
-	query += " group by policy_group_Id "
+	query += " group by policy_group_id "
 
 	err = repo.DB.SelectContext(
 		ctx,
