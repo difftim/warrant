@@ -31,6 +31,7 @@ const (
 	ObjectTypeImGroup      = "imGroup"
 	ObjectTypeWorkspaceApp = "workspaceApp"
 	ObjectTypeOrg          = "org"
+	ObjectTypePolicyGroup  = "policyGroup"
 
 	InheritIfAllOf  = "allOf"
 	InheritIfAnyOf  = "anyOf"

@@ -33,6 +33,7 @@ type ObjectRepository interface {
 	DeleteByObjectTypeAndId(ctx context.Context, objectType string, objectId string) error
 	DeleteWarrantsMatchingObject(ctx context.Context, objectType string, objectId string) error
 	DeleteWarrantsMatchingSubject(ctx context.Context, subjectType string, subjectId string) error
+	GetPolicyGroupWarrantCount(ctx context.Context, objectIds []string) (map[string]PolicyGroupObjectCount, error)
 }
 
 func NewRepository(db database.Database) (ObjectRepository, error) {

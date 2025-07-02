@@ -111,3 +111,13 @@ func (object Object) ToObjectSpec() (*ObjectSpec, error) {
 		CreatedAt:  object.CreatedAt,
 	}, nil
 }
+
+type PolicyGroupWarrantCount struct {
+	PolicyGroupId string `postgres:"policyGroupId" sqlite:"policyGroupId" mysql:"policyGroupId"`
+	WarrantCount  int    `postgres:"warrantCount"         sqlite:"warrantCount"         mysql:"warrantCount"`
+}
+type PolicyGroupObjectCount struct {
+	ObjectId  string
+	AppCount  int
+	UserCount int
+}
