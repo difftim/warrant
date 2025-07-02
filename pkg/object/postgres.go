@@ -18,6 +18,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/rs/zerolog/log"
 	"github.com/warrant-dev/warrant/pkg/wookie"
 	"regexp"
 	"strings"
@@ -348,6 +349,9 @@ func (repo PostgresRepository) List(ctx context.Context, filterOptions *FilterOp
 			replacements = append(replacements, listParams.Limit+1)
 		}
 	}
+
+	log.Ctx(ctx).Info().Msgf("list query: %s", query)
+
 	err := repo.DB.SelectContext(
 		ctx,
 		&objects,
@@ -612,6 +616,9 @@ func (repo PostgresRepository) selectPolicyGroupWarrantAppCount(ctx context.Cont
 		query = fmt.Sprintf("%s AND org_id = '%s'", query, orgId)
 	}
 	query += " group by policyGroupId "
+
+	log.Ctx(ctx).Info().Msgf("selectPolicyGroupWarrantUserCount query: %s", query)
+
 	err = repo.DB.SelectContext(
 		ctx,
 		&warrantAppCounts,
@@ -640,6 +647,8 @@ func (repo PostgresRepository) selectPolicyGroupWarrantUserCount(ctx context.Con
 		query = fmt.Sprintf("%s AND org_id = '%s'", query, orgId)
 	}
 	query += " group by policyGroupId "
+
+	log.Ctx(ctx).Info().Msgf("selectPolicyGroupWarrantUserCount query: %s", query)
 
 	err = repo.DB.SelectContext(
 		ctx,
