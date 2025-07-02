@@ -603,7 +603,6 @@ func (repo PostgresRepository) selectPolicyGroupWarrantAppCount(ctx context.Cont
 			count(distinct object_id) as warrantCount
 		FROM warrant
 		WHERE deleted_at IS NULL
-		AND org_id = ?
 		AND object_type ='workspaceApp'
 		AND subject_id IN (?)
 		AND subject_type ='policyGroup'
@@ -633,7 +632,6 @@ func (repo PostgresRepository) selectPolicyGroupWarrantUserCount(ctx context.Con
 			count(distinct subject_id) as warrantCount
 		FROM warrant
 		WHERE deleted_at IS NULL
-		AND org_id = ?
 		AND object_type ='policyGroup'
 		AND object_id IN (?)
 		AND subject_type ='user'
