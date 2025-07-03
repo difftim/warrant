@@ -108,6 +108,7 @@ func (object Object) ToObjectSpec() (*ObjectSpec, error) {
 		ObjectType: object.ObjectType,
 		ObjectId:   object.ObjectId,
 		Meta:       meta,
+		OrgId:      object.OrgId,
 		CreatedAt:  object.CreatedAt,
 	}, nil
 }
