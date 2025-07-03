@@ -77,8 +77,8 @@ type ListObjectsSpecV2 struct {
 
 type PolicyGroupObjectSpec struct {
 	ObjectSpec
-	UserCount int
-	AppCount  int
+	UserCount int `json:"userCount"`
+	AppCount  int `json:"appCount"`
 }
 
 type PolicyGroupListSpec struct {
