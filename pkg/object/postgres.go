@@ -625,7 +625,7 @@ func (repo PostgresRepository) selectPolicyGroupWarrantAppCount(ctx context.Cont
 		ctx,
 		&warrantAppCounts,
 		query,
-		strings.Join(objectIds, ","),
+		strings.Join(objectIds, "','"),
 	)
 	if err != nil {
 		return nil, errors.Wrap(err, "error selecting policy group warrant app count")
@@ -656,7 +656,7 @@ func (repo PostgresRepository) selectPolicyGroupWarrantUserCount(ctx context.Con
 		ctx,
 		&warrantUserCounts,
 		query,
-		strings.Join(objectIds, ","),
+		strings.Join(objectIds, "','"),
 	)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error getting policy group warrant user counts for objects %v", objectIds)
