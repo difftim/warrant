@@ -609,7 +609,7 @@ func (repo PostgresRepository) selectPolicyGroupWarrantAppCount(ctx context.Cont
 		AND subject_type ='policyGroup'
 		AND relation ='member'
 	`
-	query = fmt.Sprintf("%s AND object_id IN ('%s')", query, strings.Join(objectIds, "','"))
+	query = fmt.Sprintf("%s AND subject_id IN ('%s')", query, strings.Join(objectIds, "','"))
 
 	if orgId != nil && orgId != "" {
 		query = fmt.Sprintf("%s AND org_id = '%s'", query, orgId)
