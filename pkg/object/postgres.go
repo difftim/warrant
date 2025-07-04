@@ -18,10 +18,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/rs/zerolog/log"
-	"github.com/warrant-dev/warrant/pkg/wookie"
 	"regexp"
 	"strings"
+
+	"github.com/rs/zerolog/log"
+	"github.com/warrant-dev/warrant/pkg/wookie"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
@@ -610,10 +611,11 @@ func (repo PostgresRepository) selectPolicyGroupWarrantAppCount(ctx context.Cont
 		FROM warrant
 		WHERE deleted_at IS NULL
 		AND object_type ='workspaceApp'
-		AND subject_id IN (?)
 		AND subject_type ='policyGroup'
 		AND relation ='member'
 	`
+	query = fmt.Sprintf("%s AND object_id IN ('%s')", query, strings.Join(objectIds, "','"))
+
 	if orgId != nil && orgId != "" {
 		query = fmt.Sprintf("%s AND org_id = '%s'", query, orgId)
 	}
@@ -625,7 +627,6 @@ func (repo PostgresRepository) selectPolicyGroupWarrantAppCount(ctx context.Cont
 		ctx,
 		&warrantAppCounts,
 		query,
-		strings.Join(objectIds, "','"),
 	)
 	if err != nil {
 		return nil, errors.Wrap(err, "error selecting policy group warrant app count")
@@ -641,10 +642,11 @@ func (repo PostgresRepository) selectPolicyGroupWarrantUserCount(ctx context.Con
 		FROM warrant
 		WHERE deleted_at IS NULL
 		AND object_type ='policyGroup'
-		AND object_id IN (?)
 		AND subject_type ='user'
 		AND relation ='member'
 	`
+	query = fmt.Sprintf("%s AND object_id IN ('%s')", query, strings.Join(objectIds, "','"))
+
 	if orgId != nil && orgId != "" {
 		query = fmt.Sprintf("%s AND org_id = '%s'", query, orgId)
 	}
@@ -656,7 +658,6 @@ func (repo PostgresRepository) selectPolicyGroupWarrantUserCount(ctx context.Con
 		ctx,
 		&warrantUserCounts,
 		query,
-		strings.Join(objectIds, "','"),
 	)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error getting policy group warrant user counts for objects %v", objectIds)
