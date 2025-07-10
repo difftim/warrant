@@ -604,6 +604,10 @@ func (repo PostgresRepository) GetPolicyGroupWarrantCount(ctx context.Context, o
 }
 
 func (repo PostgresRepository) selectPolicyGroupWarrantAppCount(ctx context.Context, objectIds []string, orgId any) (warrantAppCounts []PolicyGroupWarrantCount, err error) {
+	if len(objectIds) > 2000 {
+		objectIds = objectIds[:2000]
+	}
+
 	query := `
 		SELECT
 			subject_id as policy_group_id,
@@ -635,6 +639,10 @@ func (repo PostgresRepository) selectPolicyGroupWarrantAppCount(ctx context.Cont
 }
 
 func (repo PostgresRepository) selectPolicyGroupWarrantUserCount(ctx context.Context, objectIds []string, orgId any) (warrantUserCounts []PolicyGroupWarrantCount, err error) {
+	if len(objectIds) > 2000 {
+		objectIds = objectIds[:2000]
+	}
+
 	query := `
 		SELECT
 			object_id as policy_group_id,
