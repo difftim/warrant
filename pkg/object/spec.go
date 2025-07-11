@@ -74,3 +74,15 @@ type ListObjectsSpecV2 struct {
 	NextCursor *service.Cursor `json:"nextCursor,omitempty"`
 	PrevCursor *service.Cursor `json:"prevCursor,omitempty"`
 }
+
+type PolicyGroupObjectSpec struct {
+	ObjectSpec
+	UserCount int `json:"userCount"`
+	AppCount  int `json:"appCount"`
+}
+
+type PolicyGroupListSpec struct {
+	Results    []PolicyGroupObjectSpec `json:"results"`
+	NextCursor *service.Cursor         `json:"nextCursor,omitempty"`
+	PrevCursor *service.Cursor         `json:"prevCursor,omitempty"`
+}

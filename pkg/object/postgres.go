@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"github.com/warrant-dev/warrant/pkg/wookie"
 	"regexp"
+	"strings"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
@@ -191,8 +192,9 @@ func (repo PostgresRepository) BatchGetByObjectTypeAndIds(ctx context.Context, o
 
 func (repo PostgresRepository) List(ctx context.Context, filterOptions *FilterOptions, listParams service.ListParams) ([]Model, *service.Cursor, *service.Cursor, error) {
 	orgId := ctx.Value(wookie.OrgIdKey)
-	if orgId == nil || orgId == "" {
-		return nil, nil, nil, service.NewInvalidParameterError("orgId", "orgId must be set")
+	supportCrossOrg := ctx.Value(wookie.SupportCrossOrgKey).(bool)
+	if !supportCrossOrg && (orgId == nil || orgId == "") {
+		return nil, nil, nil, service.NewInvalidParameterError("orgId", "orgId is required")
 	}
 
 	models := make([]Model, 0)
@@ -203,7 +205,9 @@ func (repo PostgresRepository) List(ctx context.Context, filterOptions *FilterOp
 		WHERE
 			deleted_at IS NULL
 	`
-	query = fmt.Sprintf("%s AND org_id = %s", query, orgId)
+	if orgId != nil && orgId != "" {
+		query = fmt.Sprintf("%s AND org_id = '%s'", query, orgId)
+	}
 
 	replacements := []interface{}{}
 	primaryKeyColumn := sortRegexp.ReplaceAllString(PrimarySortKey, `_$1`)
@@ -550,4 +554,111 @@ func (repo PostgresRepository) DeleteWarrantsMatchingSubject(ctx context.Context
 	}
 
 	return nil
+}
+
+func (repo PostgresRepository) GetPolicyGroupWarrantCount(ctx context.Context, objectIds []string) (map[string]PolicyGroupObjectCount, error) {
+	orgId := ctx.Value(wookie.OrgIdKey)
+	supportCrossOrg := ctx.Value(wookie.SupportCrossOrgKey).(bool)
+	if !supportCrossOrg && (orgId == nil || orgId == "") {
+		return nil, service.NewInvalidParameterError("orgId", "orgId must be set")
+	}
+	if len(objectIds) == 0 {
+		return nil, service.NewInvalidParameterError("objectIds", "objectIds must be set")
+	}
+
+	warrantUserCounts, err := repo.selectPolicyGroupWarrantUserCount(ctx, objectIds, orgId)
+	if err != nil {
+		return nil, errors.Wrap(err, "error getting policy group warrant user count")
+	}
+
+	warrantAppCounts, err := repo.selectPolicyGroupWarrantAppCount(ctx, objectIds, orgId)
+	if err != nil {
+		return nil, errors.Wrap(err, "error getting policy group warrant app count")
+	}
+
+	ObjectCounts := make(map[string]PolicyGroupObjectCount)
+	for _, objectId := range objectIds {
+		objectCount := PolicyGroupObjectCount{
+			ObjectId:  objectId,
+			UserCount: 0,
+			AppCount:  0,
+		}
+		for _, warrantUserCount := range warrantUserCounts {
+			if warrantUserCount.PolicyGroupId == objectId {
+				objectCount.UserCount = warrantUserCount.WarrantCount
+			}
+		}
+		for _, warrantAppCount := range warrantAppCounts {
+			if warrantAppCount.PolicyGroupId == objectId {
+				objectCount.AppCount = warrantAppCount.WarrantCount
+			}
+		}
+		ObjectCounts[objectId] = objectCount
+	}
+	return ObjectCounts, nil
+}
+
+func (repo PostgresRepository) selectPolicyGroupWarrantAppCount(ctx context.Context, objectIds []string, orgId any) (warrantAppCounts []PolicyGroupWarrantCount, err error) {
+	if len(objectIds) > 2000 {
+		objectIds = objectIds[:2000]
+	}
+
+	query := `
+		SELECT
+			subject_id as policy_group_id,
+			count(distinct object_id) as warrant_count
+		FROM warrant
+		WHERE deleted_at IS NULL
+		AND object_type ='workspaceApp'
+		AND subject_type ='policyGroup'
+		AND relation ='member'
+	`
+	query = fmt.Sprintf("%s AND subject_id IN ('%s')", query, strings.Join(objectIds, "','"))
+
+	if orgId != nil && orgId != "" {
+		query = fmt.Sprintf("%s AND org_id = '%s'", query, orgId)
+	}
+	query += " group by policy_group_id "
+	err = repo.DB.SelectContext(
+		ctx,
+		&warrantAppCounts,
+		query,
+	)
+	if err != nil {
+		return nil, errors.Wrap(err, "error selecting policy group warrant app count")
+	}
+	return warrantAppCounts, nil
+}
+
+func (repo PostgresRepository) selectPolicyGroupWarrantUserCount(ctx context.Context, objectIds []string, orgId any) (warrantUserCounts []PolicyGroupWarrantCount, err error) {
+	if len(objectIds) > 2000 {
+		objectIds = objectIds[:2000]
+	}
+
+	query := `
+		SELECT
+			object_id as policy_group_id,
+			count(distinct subject_id) as warrant_count
+		FROM warrant
+		WHERE deleted_at IS NULL
+		AND object_type ='policyGroup'
+		AND subject_type ='user'
+		AND relation ='member'
+	`
+	query = fmt.Sprintf("%s AND object_id IN ('%s')", query, strings.Join(objectIds, "','"))
+
+	if orgId != nil && orgId != "" {
+		query = fmt.Sprintf("%s AND org_id = '%s'", query, orgId)
+	}
+	query += " group by policy_group_id "
+
+	err = repo.DB.SelectContext(
+		ctx,
+		&warrantUserCounts,
+		query,
+	)
+	if err != nil {
+		return nil, errors.Wrapf(err, "error getting policy group warrant user counts for objects %v", objectIds)
+	}
+	return warrantUserCounts, nil
 }
