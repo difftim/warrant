@@ -522,7 +522,8 @@ func (repo PostgresRepository) ListWarrantApps(ctx context.Context) ([]*WarrantA
 		SELECT 
 		    object_id,
 		    COUNT(DISTINCT CASE WHEN subject_type = 'user' THEN subject_id ELSE NULL END) as warrant_user_count,
-			COUNT(DISTINCT CASE WHEN subject_type = 'org' THEN subject_id ELSE NULL END) as warrant_org_count
+			COUNT(DISTINCT CASE WHEN subject_type = 'org' THEN subject_id ELSE NULL END) as warrant_org_count,
+			COUNT(DISTINCT CASE WHEN subject_type = 'policyGroup' THEN subject_id ELSE NULL END) as warrant_policy_group_count
 		FROM warrant
 		WHERE deleted_at IS NULL
 		AND object_type = 'workspaceApp'
