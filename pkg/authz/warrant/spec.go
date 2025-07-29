@@ -249,9 +249,10 @@ type ListWarrantsSpecV2 struct {
 }
 
 type WarrantApp struct {
-	AppId            string `json:"appId" postgres:"object_id"`
-	WarrantUserCount int    `json:"warrantUserCount" postgres:"warrant_user_count"`
-	WarrantOrgCount  int    `json:"warrantOrgCount"  postgres:"warrant_org_count"`
+	AppId                   string `json:"appId" postgres:"object_id"`
+	WarrantUserCount        int    `json:"warrantUserCount" postgres:"warrant_user_count"`
+	WarrantOrgCount         int    `json:"warrantOrgCount"  postgres:"warrant_org_count"`
+	WarrantPolicyGroupCount int    `json:"warrantPolicyGroupCount" postgres:"warrant_policy_group_count"`
 }
 
 type CommonResponse struct {
