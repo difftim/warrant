@@ -116,6 +116,7 @@ func createHandler(svc WarrantService, w http.ResponseWriter, r *http.Request) e
 		return err
 	}
 	var createdWarrants []*WarrantSpec
+	orgIdInCtx := ctx.Value(wookie.OrgIdKey)
 	for _, spec := range specs.Warrants {
 		if spec.Policy != "" {
 			err := spec.Policy.Validate()
@@ -124,7 +125,6 @@ func createHandler(svc WarrantService, w http.ResponseWriter, r *http.Request) e
 			}
 		}
 
-		orgIdInCtx := ctx.Value(wookie.OrgIdKey)
 		if orgIdInCtx == nil || orgIdInCtx == "" {
 			ctx = context.WithValue(ctx, wookie.OrgIdKey, spec.OrgId)
 		}
