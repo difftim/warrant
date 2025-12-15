@@ -42,6 +42,7 @@ type Config interface {
 	GetEnableAccessLog() bool
 	GetAutoMigrate() bool
 	GetDatastore() DatastoreConfig
+	GetKafka() *KafkaConfig
 }
 
 type WarrantConfig struct {
@@ -53,6 +54,7 @@ type WarrantConfig struct {
 	Authentication  *AuthConfig             `mapstructure:"authentication"`
 	Check           *CheckConfig            `mapstructure:"check"`
 	Grpc            *GrpcConfig             `mapstructure:"grpc"`
+	Kafka           *KafkaConfig            `mapstructure:"kafka"`
 }
 
 func (warrantConfig WarrantConfig) GetPort() int {
@@ -73,6 +75,10 @@ func (warrantConfig WarrantConfig) GetAutoMigrate() bool {
 
 func (warrantConfig WarrantConfig) GetDatastore() DatastoreConfig {
 	return warrantConfig.Datastore
+}
+
+func (warrantConfig WarrantConfig) GetKafka() *KafkaConfig {
+	return warrantConfig.Kafka
 }
 
 func (warrantConfig WarrantConfig) GetAuthentication() *AuthConfig {
@@ -177,6 +183,25 @@ type GrpcClientConfig struct {
 	MainServerHost string `mapstructure:"mainServerHost"`
 }
 
+type KafkaConfig struct {
+	Enabled          bool          `mapstructure:"enabled"`
+	Brokers          []string      `mapstructure:"brokers"`
+	Topic            string        `mapstructure:"topic"`
+	ClientID         string        `mapstructure:"clientId"`
+	WriteTimeout     time.Duration `mapstructure:"writeTimeout"`
+	DialTimeout      time.Duration `mapstructure:"dialTimeout"`
+	BatchTimeout     time.Duration `mapstructure:"batchTimeout"`
+	BatchSize        int           `mapstructure:"batchSize"`
+	BatchBytes       int64         `mapstructure:"batchBytes"`
+	RequiredAcks     int           `mapstructure:"requiredAcks"`
+	AllowAutoTopic   bool          `mapstructure:"allowAutoTopicCreation"`
+	Async            bool          `mapstructure:"async"`
+	MaxAttempts      int           `mapstructure:"maxAttempts"`
+	MetadataTTL      time.Duration `mapstructure:"metadataTTL"`
+	ReadTimeout      time.Duration `mapstructure:"readTimeout"`
+	RebalanceTimeout time.Duration `mapstructure:"rebalanceTimeout"`
+}
+
 func NewConfig() WarrantConfig {
 	viper.SetConfigFile(ConfigFileName)
 	viper.SetDefault("port", 8000)
@@ -196,6 +221,20 @@ func NewConfig() WarrantConfig {
 	viper.SetDefault("check.concurrency", 4)
 	viper.SetDefault("check.maxConcurrency", 1000)
 	viper.SetDefault("check.timeout", 1*time.Minute)
+	viper.SetDefault("kafka.enabled", false)
+	viper.SetDefault("kafka.clientId", "warrant")
+	viper.SetDefault("kafka.dialTimeout", 10*time.Second)
+	viper.SetDefault("kafka.writeTimeout", 10*time.Second)
+	viper.SetDefault("kafka.readTimeout", 10*time.Second)
+	viper.SetDefault("kafka.batchTimeout", 250*time.Millisecond)
+	viper.SetDefault("kafka.batchSize", 100)
+	viper.SetDefault("kafka.batchBytes", int64(1048576)) // 1MB
+	viper.SetDefault("kafka.requiredAcks", 1)
+	viper.SetDefault("kafka.allowAutoTopicCreation", false)
+	viper.SetDefault("kafka.async", false)
+	viper.SetDefault("kafka.maxAttempts", 3)
+	viper.SetDefault("kafka.metadataTTL", 5*time.Minute)
+	viper.SetDefault("kafka.rebalanceTimeout", 30*time.Second)
 
 	// If config file exists, use it
 	_, err := os.ReadFile(ConfigFileName)

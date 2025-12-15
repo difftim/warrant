@@ -25,3 +25,9 @@ datastore:
 grpc:
   client:
     mainServerHost: MainServersTestInternal-f8f83f8a4cdae750.elb.ap-southeast-1.amazonaws.com:55565
+
+# kafka:
+#   enabled: false
+#   brokers:
+#     - "127.0.0.1:9092"
+#   topic: "warrant-events"
