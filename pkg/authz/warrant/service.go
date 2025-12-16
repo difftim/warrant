@@ -18,7 +18,9 @@ import (
 	"context"
 	"errors"
 
+	"github.com/rs/zerolog/log"
 	objecttype "github.com/warrant-dev/warrant/pkg/authz/objecttype"
+	"github.com/warrant-dev/warrant/pkg/messaging/event"
 	"github.com/warrant-dev/warrant/pkg/object"
 	"github.com/warrant-dev/warrant/pkg/service"
 	"github.com/warrant-dev/warrant/pkg/wookie"
@@ -135,6 +137,9 @@ func (svc WarrantService) Create(ctx context.Context, spec CreateWarrantSpec) (*
 		return nil, nil, err
 	}
 
+	// 发送授权变更通知（异步，不阻塞主流程）
+	go svc.notifyAuthzChange(context.Background(), spec.ObjectType, spec.ObjectId, spec.Subject.ObjectType, spec.Subject.ObjectId, spec.Relation, spec.OrgId, event.EventTypeGrant)
+
 	return createdWarrant.ToWarrantSpec(), nil, nil
 }
 
@@ -170,10 +175,102 @@ func (svc WarrantService) Delete(ctx context.Context, spec DeleteWarrantSpec) (*
 		return nil, err
 	}
 
+	// 发送授权撤销通知（异步，不阻塞主流程）
+	subjectType := ""
+	subjectId := ""
+	if spec.Subject != nil {
+		subjectType = spec.Subject.ObjectType
+		subjectId = spec.Subject.ObjectId
+	}
+	go svc.notifyAuthzChange(context.Background(), spec.ObjectType, spec.ObjectId, subjectType, subjectId, spec.Relation, "", event.EventTypeRevoke)
+
 	//nolint:nilnil
 	return nil, nil
 }
 
 func (svc WarrantService) ListWarrantApps(ctx context.Context) ([]*WarrantApp, error) {
 	return svc.repository.ListWarrantApps(ctx)
+}
+
+// notifyAuthzChange 发送授权变更通知
+// 特殊处理：如果 workspaceApp 给 policyGroup 授权变更，需要展开 policyGroup 下所有 user member 逐个发通知
+func (svc WarrantService) notifyAuthzChange(ctx context.Context, objectType, objectId, subjectType, subjectId, relation, orgId, eventType string) {
+	// 只处理 workspaceApp 的 member 授权变更
+	if !event.ShouldNotify(objectType, relation) {
+		return
+	}
+
+	// 只处理支持的 subjectType
+	if !event.IsSupportedSubjectType(subjectType) {
+		return
+	}
+
+	// 特殊处理：workspaceApp -> policyGroup 授权变更
+	// 需要展开 policyGroup 下所有的 user member，逐个发通知
+	if subjectType == objecttype.ObjectTypePolicyGroup {
+		svc.notifyPolicyGroupMembers(ctx, objectType, objectId, subjectId, relation, orgId, eventType)
+		return
+	}
+
+	// 普通情况：直接发送通知
+	// 对于 user 类型，直接发送
+	// 对于 org 类型，也直接发送（由下游消费者处理）
+	evt := event.NewAuthzChangeEvent(eventType, objectType, objectId, subjectType, subjectId, relation, orgId)
+	if err := event.PublishAuthzChangeEvent(ctx, evt); err != nil {
+		log.Error().Err(err).
+			Str("eventType", eventType).
+			Str("objectType", objectType).
+			Str("objectId", objectId).
+			Str("subjectType", subjectType).
+			Str("subjectId", subjectId).
+			Msg("failed to publish authz change event")
+	}
+}
+
+// notifyPolicyGroupMembers 展开 policyGroup 下的所有 user member，逐个发送通知
+func (svc WarrantService) notifyPolicyGroupMembers(ctx context.Context, objectType, objectId, policyGroupId, relation, orgId, eventType string) {
+	// 查询 policyGroup 下的所有 user member
+	// policyGroup:xxx#member@user:yyy
+	filterParams := FilterParams{
+		ObjectType:  objecttype.ObjectTypePolicyGroup,
+		ObjectId:    policyGroupId,
+		Relation:    event.RelationMember,
+		SubjectType: objecttype.ObjectTypeUser,
+	}
+	listParams := service.ListParams{
+		Limit:     1000, // 一次最多查 1000 个
+		SortBy:    "createdAt",
+		SortOrder: service.SortOrderDesc,
+	}
+
+	warrants, _, _, err := svc.repository.List(ctx, filterParams, listParams)
+	if err != nil {
+		log.Error().Err(err).
+			Str("policyGroupId", policyGroupId).
+			Msg("failed to list policyGroup members for notification")
+		return
+	}
+
+	// 为每个 user member 发送通知
+	for _, warrant := range warrants {
+		userId := warrant.GetSubjectId()
+		evt := event.NewAuthzChangeEvent(eventType, objectType, objectId, objecttype.ObjectTypeUser, userId, relation, orgId)
+		if err := event.PublishAuthzChangeEvent(ctx, evt); err != nil {
+			log.Error().Err(err).
+				Str("eventType", eventType).
+				Str("objectType", objectType).
+				Str("objectId", objectId).
+				Str("userId", userId).
+				Str("policyGroupId", policyGroupId).
+				Msg("failed to publish authz change event for policyGroup member")
+		}
+	}
+
+	log.Info().
+		Str("eventType", eventType).
+		Str("objectType", objectType).
+		Str("objectId", objectId).
+		Str("policyGroupId", policyGroupId).
+		Int("memberCount", len(warrants)).
+		Msg("published authz change events for policyGroup members")
 }

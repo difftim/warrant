@@ -17,9 +17,10 @@ package main
 import (
 	"context"
 	"fmt"
-	grpcClients "github.com/warrant-dev/warrant/pkg/grpc/client"
 	"net/http"
 	"time"
+
+	grpcClients "github.com/warrant-dev/warrant/pkg/grpc/client"
 
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
@@ -29,6 +30,7 @@ import (
 	warrant "github.com/warrant-dev/warrant/pkg/authz/warrant"
 	"github.com/warrant-dev/warrant/pkg/config"
 	"github.com/warrant-dev/warrant/pkg/database"
+	kafkaproducer "github.com/warrant-dev/warrant/pkg/messaging/kafka"
 	object "github.com/warrant-dev/warrant/pkg/object"
 	feature "github.com/warrant-dev/warrant/pkg/object/feature"
 	permission "github.com/warrant-dev/warrant/pkg/object/permission"
@@ -126,6 +128,16 @@ func main() {
 	err := svcEnv.InitDB(cfg)
 	if err != nil {
 		log.Fatal().Err(err).Msg("init: could not initialize and connect to the configured datastore. Shutting down.")
+	}
+
+	// init kafka producer (optional)
+	if kafkaCfg := cfg.GetKafka(); kafkaCfg != nil && kafkaCfg.Enabled {
+		if err := kafkaproducer.Init(kafkaCfg); err != nil {
+			log.Fatal().Err(err).Msg("init: could not initialize kafka producer. Shutting down.")
+		}
+		log.Info().Msg("init: kafka producer initialized")
+	} else {
+		log.Info().Msg("init: kafka producer disabled")
 	}
 
 	// init grpc clients
