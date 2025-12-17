@@ -17,6 +17,7 @@ package authz
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/rs/zerolog/log"
 	objecttype "github.com/warrant-dev/warrant/pkg/authz/objecttype"
@@ -153,7 +154,12 @@ func (svc WarrantService) Create(ctx context.Context, spec CreateWarrantSpec) (*
 		Msgf("Create warrant finished: %v", createdWarrant)
 
 	// 发送授权变更通知（异步，不阻塞主流程）
-	svc.notifyAuthzChange(context.Background(), spec.ObjectType, spec.ObjectId, spec.Subject.ObjectType, spec.Subject.ObjectId, spec.Relation, spec.OrgId, event.EventTypeGrant)
+	// 复制 ctx 避免 HTTP 请求结束后 context 被取消
+	asyncCtx, cancel := copyContextForAsync(ctx)
+	go func() {
+		defer cancel()
+		svc.notifyAuthzChange(asyncCtx, spec.ObjectType, spec.ObjectId, spec.Subject.ObjectType, spec.Subject.ObjectId, spec.Relation, spec.OrgId, event.EventTypeGrant)
+	}()
 
 	return createdWarrant.ToWarrantSpec(), nil, nil
 }
@@ -191,13 +197,18 @@ func (svc WarrantService) Delete(ctx context.Context, spec DeleteWarrantSpec) (*
 	}
 
 	// 发送授权撤销通知（异步，不阻塞主流程）
+	// 复制 ctx 避免 HTTP 请求结束后 context 被取消
+	asyncCtx, cancel := copyContextForAsync(ctx)
 	subjectType := ""
 	subjectId := ""
 	if spec.Subject != nil {
 		subjectType = spec.Subject.ObjectType
 		subjectId = spec.Subject.ObjectId
 	}
-	svc.notifyAuthzChange(context.Background(), spec.ObjectType, spec.ObjectId, subjectType, subjectId, spec.Relation, "", event.EventTypeRevoke)
+	go func() {
+		defer cancel()
+		svc.notifyAuthzChange(asyncCtx, spec.ObjectType, spec.ObjectId, subjectType, subjectId, spec.Relation, "", event.EventTypeRevoke)
+	}()
 
 	//nolint:nilnil
 	return nil, nil
@@ -205,6 +216,14 @@ func (svc WarrantService) Delete(ctx context.Context, spec DeleteWarrantSpec) (*
 
 func (svc WarrantService) ListWarrantApps(ctx context.Context) ([]*WarrantApp, error) {
 	return svc.repository.ListWarrantApps(ctx)
+}
+
+// copyContextForAsync 复制 ctx 中的所有值到新的 context，用于异步 goroutine
+// 新的 context 不会被原始 HTTP 请求取消，但保留所有存储的值
+// 添加 30 秒超时保护，防止 goroutine 泄漏
+func copyContextForAsync(ctx context.Context) (context.Context, context.CancelFunc) {
+	newCtx := context.WithoutCancel(ctx)
+	return context.WithTimeout(newCtx, 30*time.Second)
 }
 
 // notifyAuthzChange 发送授权变更通知
