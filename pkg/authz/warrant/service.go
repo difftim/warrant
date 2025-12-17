@@ -137,6 +137,9 @@ func (svc WarrantService) Create(ctx context.Context, spec CreateWarrantSpec) (*
 		return nil, nil, err
 	}
 
+	log.Ctx(ctx).Info().
+		Msgf("Create warrant success: %v", createdWarrant)
+
 	// 发送授权变更通知（异步，不阻塞主流程）
 	go svc.notifyAuthzChange(context.Background(), spec.ObjectType, spec.ObjectId, spec.Subject.ObjectType, spec.Subject.ObjectId, spec.Relation, spec.OrgId, event.EventTypeGrant)
 
