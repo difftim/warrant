@@ -153,7 +153,7 @@ func (svc WarrantService) Create(ctx context.Context, spec CreateWarrantSpec) (*
 		Msgf("Create warrant finished: %v", createdWarrant)
 
 	// 发送授权变更通知（异步，不阻塞主流程）
-	go svc.notifyAuthzChange(context.Background(), spec.ObjectType, spec.ObjectId, spec.Subject.ObjectType, spec.Subject.ObjectId, spec.Relation, spec.OrgId, event.EventTypeGrant)
+	svc.notifyAuthzChange(context.Background(), spec.ObjectType, spec.ObjectId, spec.Subject.ObjectType, spec.Subject.ObjectId, spec.Relation, spec.OrgId, event.EventTypeGrant)
 
 	return createdWarrant.ToWarrantSpec(), nil, nil
 }
@@ -197,7 +197,7 @@ func (svc WarrantService) Delete(ctx context.Context, spec DeleteWarrantSpec) (*
 		subjectType = spec.Subject.ObjectType
 		subjectId = spec.Subject.ObjectId
 	}
-	go svc.notifyAuthzChange(context.Background(), spec.ObjectType, spec.ObjectId, subjectType, subjectId, spec.Relation, "", event.EventTypeRevoke)
+	svc.notifyAuthzChange(context.Background(), spec.ObjectType, spec.ObjectId, subjectType, subjectId, spec.Relation, "", event.EventTypeRevoke)
 
 	//nolint:nilnil
 	return nil, nil
@@ -210,7 +210,7 @@ func (svc WarrantService) ListWarrantApps(ctx context.Context) ([]*WarrantApp, e
 // notifyAuthzChange 发送授权变更通知
 // 特殊处理：如果 workspaceApp 给 policyGroup 授权变更，需要展开 policyGroup 下所有 user member 逐个发通知
 func (svc WarrantService) notifyAuthzChange(ctx context.Context, objectType, objectId, subjectType, subjectId, relation, orgId, eventType string) {
-	log.Ctx(ctx).Info().
+	log.Info().
 		Msgf("notifyAuthzChange: %v", map[string]string{
 			"objectType":  objectType,
 			"relation":    relation,
