@@ -195,6 +195,15 @@ func (svc WarrantService) ListWarrantApps(ctx context.Context) ([]*WarrantApp, e
 // notifyAuthzChange 发送授权变更通知
 // 特殊处理：如果 workspaceApp 给 policyGroup 授权变更，需要展开 policyGroup 下所有 user member 逐个发通知
 func (svc WarrantService) notifyAuthzChange(ctx context.Context, objectType, objectId, subjectType, subjectId, relation, orgId, eventType string) {
+	log.Ctx(ctx).Info().
+		Msgf("notifyAuthzChange: %v", map[string]string{
+			"objectType":  objectType,
+			"relation":    relation,
+			"subjectType": subjectType,
+			"subjectId":   subjectId,
+			"orgId":       orgId,
+			"eventType":   eventType,
+		})
 	// 只处理 workspaceApp 的 member 授权变更
 	if !event.ShouldNotify(objectType, relation) {
 		log.Info().
