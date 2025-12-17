@@ -26,8 +26,10 @@ grpc:
   client:
     mainServerHost: MainServersTestInternal-f8f83f8a4cdae750.elb.ap-southeast-1.amazonaws.com:55565
 
-# kafka:
-#   enabled: false
-#   brokers:
-#     - "127.0.0.1:9092"
-#   topic: "warrant-events"
+kafka:
+  enabled: true
+  brokers:
+    - "b-1.envtestapisixgate.v11hv8.c5.kafka.ap-southeast-1.amazonaws.com:9092"
+    - "b-2.envtestapisixgate.v11hv8.c5.kafka.ap-southeast-1.amazonaws.com:9092"
+    - "b-3.envtestapisixgate.v11hv8.c5.kafka.ap-southeast-1.amazonaws.com:9092"
+  topic: "topic-warrant-events"

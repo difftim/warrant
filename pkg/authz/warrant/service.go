@@ -197,11 +197,18 @@ func (svc WarrantService) ListWarrantApps(ctx context.Context) ([]*WarrantApp, e
 func (svc WarrantService) notifyAuthzChange(ctx context.Context, objectType, objectId, subjectType, subjectId, relation, orgId, eventType string) {
 	// 只处理 workspaceApp 的 member 授权变更
 	if !event.ShouldNotify(objectType, relation) {
+		log.Info().
+			Str("objectType", objectType).
+			Str("relation", relation).
+			Msg("skip notify authz change")
 		return
 	}
 
 	// 只处理支持的 subjectType
 	if !event.IsSupportedSubjectType(subjectType) {
+		log.Info().
+			Str("subjectType", subjectType).
+			Msg("skip notify authz change")
 		return
 	}
 
