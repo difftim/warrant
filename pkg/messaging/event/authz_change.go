@@ -53,13 +53,13 @@ func (e *AuthzChangeEvent) ToJSON() ([]byte, error) {
 // PublishAuthzChangeEvent 发布授权变更事件到 Kafka
 func PublishAuthzChangeEvent(ctx context.Context, event *AuthzChangeEvent) error {
 	if !kafka.IsEnabled() {
-		log.Info().Msg("kafka is disabled, skip publishing authz change event")
+		log.Ctx(ctx).Info().Msg("kafka is disabled, skip publishing authz change event")
 		return nil
 	}
 
 	data, err := event.ToJSON()
 	if err != nil {
-		log.Error().Err(err).Msg("failed to serialize authz change event")
+		log.Ctx(ctx).Error().Err(err).Msg("failed to serialize authz change event")
 		return err
 	}
 
@@ -68,23 +68,13 @@ func PublishAuthzChangeEvent(ctx context.Context, event *AuthzChangeEvent) error
 	}
 
 	if err := kafka.Publish(ctx, msg); err != nil {
-		log.Error().Err(err).
-			Str("eventType", event.EventType).
-			Str("objectType", event.ObjectType).
-			Str("objectId", event.ObjectId).
-			Str("subjectType", event.SubjectType).
-			Str("subjectId", event.SubjectId).
-			Msg("failed to publish authz change event to kafka")
+		log.Ctx(ctx).Error().Err(err).
+			Msgf("failed to publish authz change event to kafka: %s", string(data))
 		return err
 	}
 
-	log.Info().
-		Str("eventType", event.EventType).
-		Str("objectType", event.ObjectType).
-		Str("objectId", event.ObjectId).
-		Str("subjectType", event.SubjectType).
-		Str("subjectId", event.SubjectId).
-		Msg("published authz change event to kafka")
+	log.Ctx(ctx).Info().
+		Msgf("published authz change event to kafka: %s", string(data))
 
 	return nil
 }
@@ -92,7 +82,7 @@ func PublishAuthzChangeEvent(ctx context.Context, event *AuthzChangeEvent) error
 // ShouldNotify 判断是否需要发送通知
 // 只处理 workspaceApp 相关的授权变更，且 relation 必须是 member
 func ShouldNotify(objectType, relation string) bool {
-	if objectType != authz.ObjectTypeWorkspaceApp {
+	if objectType != authz.ObjectTypeWorkspaceApp && objectType != authz.ObjectTypePolicyGroup {
 		return false
 	}
 	if relation != RelationMember {
