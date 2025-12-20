@@ -138,7 +138,7 @@ func (svc WarrantService) Create(ctx context.Context, spec CreateWarrantSpec) (*
 		return nil, nil, err
 	}
 
-	svc.asyncNotifyAuthzChange(ctx, spec.ObjectType, spec.ObjectId, spec.Subject.ObjectType, spec.Subject.ObjectId, spec.Relation, spec.OrgId, event.EventTypeGrant)
+	svc.asyncNotifyAuthzChange(ctx, spec.ObjectType, spec.ObjectId, spec.Subject.ObjectType, spec.Subject.ObjectId, spec.Relation, createdWarrant.GetOrgId(), event.EventTypeGrant)
 
 	return createdWarrant.ToWarrantSpec(), nil, nil
 }
