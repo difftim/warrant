@@ -51,13 +51,8 @@ func NewService(env service.Env, repository WarrantRepository, objectTypeSvc obj
 }
 
 func (svc WarrantService) Create(ctx context.Context, spec CreateWarrantSpec) (*WarrantSpec, *wookie.Token, error) {
-	log.Ctx(ctx).Info().
-		Msgf("Create warrant start: %v", spec)
-
 	var createdWarrant Model
 	err := svc.Env().DB().WithinTransaction(ctx, func(txCtx context.Context) error {
-		log.Ctx(txCtx).Info().
-			Msgf("Create warrant in transaction: %v", spec)
 		// Check that objectType exists
 		objectTypeDef, err := svc.objectTypeSvc.GetByTypeId(txCtx, spec.ObjectType)
 		if err != nil {
@@ -137,14 +132,8 @@ func (svc WarrantService) Create(ctx context.Context, spec CreateWarrantSpec) (*
 			return err
 		}
 
-		log.Ctx(txCtx).Info().
-			Msgf("Create warrant success: %v", createdWarrant)
-
 		return nil
 	})
-
-	log.Ctx(ctx).Info().
-		Msgf("Create warrant result: %v", err)
 
 	if err != nil {
 		return nil, nil, err
