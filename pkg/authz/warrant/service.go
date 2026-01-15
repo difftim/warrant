@@ -17,8 +17,11 @@ package authz
 import (
 	"context"
 	"errors"
+	"time"
 
+	"github.com/rs/zerolog/log"
 	objecttype "github.com/warrant-dev/warrant/pkg/authz/objecttype"
+	"github.com/warrant-dev/warrant/pkg/messaging/event"
 	"github.com/warrant-dev/warrant/pkg/object"
 	"github.com/warrant-dev/warrant/pkg/service"
 	"github.com/warrant-dev/warrant/pkg/wookie"
@@ -135,6 +138,8 @@ func (svc WarrantService) Create(ctx context.Context, spec CreateWarrantSpec) (*
 		return nil, nil, err
 	}
 
+	svc.asyncNotifyAuthzChange(ctx, spec.ObjectType, spec.ObjectId, spec.Subject.ObjectType, spec.Subject.ObjectId, spec.Relation, createdWarrant.GetOrgId(), event.EventTypeGrant)
+
 	return createdWarrant.ToWarrantSpec(), nil, nil
 }
 
@@ -170,10 +175,162 @@ func (svc WarrantService) Delete(ctx context.Context, spec DeleteWarrantSpec) (*
 		return nil, err
 	}
 
+	// 发送授权撤销通知（异步，不阻塞主流程）
+	// 复制 ctx 避免 HTTP 请求结束后 context 被取消
+	subjectType := ""
+	subjectId := ""
+	if spec.Subject != nil {
+		subjectType = spec.Subject.ObjectType
+		subjectId = spec.Subject.ObjectId
+	}
+	svc.asyncNotifyAuthzChange(ctx, spec.ObjectType, spec.ObjectId, subjectType, subjectId, spec.Relation, ctx.Value(wookie.OrgIdKey).(string), event.EventTypeRevoke)
 	//nolint:nilnil
 	return nil, nil
 }
 
 func (svc WarrantService) ListWarrantApps(ctx context.Context) ([]*WarrantApp, error) {
 	return svc.repository.ListWarrantApps(ctx)
+}
+
+func (svc WarrantService) asyncNotifyAuthzChange(ctx context.Context, objectType, objectId, subjectType, subjectId, relation, orgId, eventType string) {
+	if objectType == "" || objectId == "" || objectId == Wildcard || subjectType == "" || subjectId == "" || subjectId == Wildcard || relation == "" || orgId == "" {
+		log.Ctx(ctx).Error().Msg("invalid parameters in asyncNotifyAuthzChange")
+		return
+	}
+
+	asyncCtx, cancel := copyContextForAsync(ctx)
+	go func() {
+		defer cancel()
+		defer func() {
+			if r := recover(); r != nil {
+				log.Ctx(asyncCtx).Error().Msgf("panic in asyncNotifyAuthzChange: %v", r)
+			}
+		}()
+		log.Ctx(asyncCtx).Info().Msgf("asyncNotifyAuthzChange start: objectType=%s, objectId=%s, subjectType=%s, subjectId=%s, relation=%s, orgId=%s, eventType=%s", objectType, objectId, subjectType, subjectId, relation, orgId, eventType)
+		svc.notifyAuthzChange(asyncCtx, objectType, objectId, subjectType, subjectId, relation, orgId, eventType)
+		log.Ctx(asyncCtx).Info().Msgf("asyncNotifyAuthzChange end: objectType=%s, objectId=%s, subjectType=%s, subjectId=%s, relation=%s, orgId=%s, eventType=%s", objectType, objectId, subjectType, subjectId, relation, orgId, eventType)
+	}()
+}
+
+// copyContextForAsync 复制 ctx 中的所有值到新的 context，用于异步 goroutine
+// 新的 context 不会被原始 HTTP 请求取消，但保留所有存储的值
+// 添加 30 秒超时保护，防止 goroutine 泄漏
+func copyContextForAsync(ctx context.Context) (context.Context, context.CancelFunc) {
+	newCtx := context.WithoutCancel(ctx)
+	return context.WithTimeout(newCtx, 30*time.Second)
+}
+
+// notifyAuthzChange 发送授权变更通知
+// 特殊处理：如果 workspaceApp 给 policyGroup 授权变更，需要展开 policyGroup 下所有 user member 逐个发通知
+func (svc WarrantService) notifyAuthzChange(ctx context.Context, objectType, objectId, subjectType, subjectId, relation, orgId, eventType string) {
+	// 只处理 workspaceApp 的 member 授权变更
+	if !event.ShouldNotify(objectType, relation) {
+		log.Info().
+			Str("objectType", objectType).
+			Str("relation", relation).
+			Msg("skip notify authz change")
+		return
+	}
+
+	// 只处理支持的 subjectType
+	if !event.IsSupportedSubjectType(subjectType) {
+		log.Info().
+			Str("subjectType", subjectType).
+			Msg("skip notify authz change")
+		return
+	}
+
+	// 特殊处理：workspaceApp -> policyGroup 授权变更
+	if subjectType == objecttype.ObjectTypePolicyGroup || objectType == objecttype.ObjectTypePolicyGroup {
+		svc.notifyPolicyGroupMembers(ctx, objectType, objectId, subjectType, subjectId, relation, orgId, eventType)
+		return
+	}
+
+	// 普通情况：直接发送通知
+	// 对于 user 类型，直接发送
+	// 对于 org 类型，也直接发送（由下游消费者处理）
+	evt := event.NewAuthzChangeEvent(eventType, objectType, objectId, subjectType, subjectId, relation, orgId)
+	if err := event.PublishAuthzChangeEvent(ctx, evt); err != nil {
+		log.Ctx(ctx).Error().Err(err).
+			Msgf("failed to publish authz change event")
+	}
+}
+
+// notifyPolicyGroupMembers 展开 policyGroup 下的所有 user member，逐个发送通知
+func (svc WarrantService) notifyPolicyGroupMembers(ctx context.Context, objectType, objectId, subjectType, subjectId, relation, orgId, eventType string) {
+	if subjectType != objecttype.ObjectTypePolicyGroup && objectType != objecttype.ObjectTypePolicyGroup {
+		log.Ctx(ctx).Info().
+			Str("subjectType", subjectType).
+			Str("objectType", objectType).
+			Msg("skip notify policyGroup members because subjectType or objectType is not policyGroup")
+		return
+	}
+
+	updateAppForPolicyGroup := objectType == objecttype.ObjectTypeWorkspaceApp && subjectType == objecttype.ObjectTypePolicyGroup
+	updateUserForPolicyGroup := objectType == objecttype.ObjectTypePolicyGroup && subjectType == objecttype.ObjectTypeUser
+
+	if !updateAppForPolicyGroup && !updateUserForPolicyGroup {
+		log.Ctx(ctx).Info().
+			Str("subjectType", subjectType).
+			Str("objectType", objectType).
+			Msg("skip notify policyGroup members because updateAppForPolicyGroup and updateUserForPolicyGroup are false")
+		return
+	}
+
+	var filterParams FilterParams
+	if updateAppForPolicyGroup {
+		filterParams = FilterParams{
+			ObjectType:  objecttype.ObjectTypePolicyGroup,
+			ObjectId:    subjectId,
+			Relation:    event.RelationMember,
+			SubjectType: objecttype.ObjectTypeUser,
+		}
+	} else if updateUserForPolicyGroup {
+		filterParams = FilterParams{
+			ObjectType:  objecttype.ObjectTypeWorkspaceApp,
+			Relation:    event.RelationMember,
+			SubjectType: objecttype.ObjectTypePolicyGroup,
+			SubjectId:   objectId,
+		}
+	}
+
+	listParams := service.ListParams{
+		Limit:     1000, // 一次最多查 1000 个
+		SortBy:    "createdAt",
+		SortOrder: service.SortOrderDesc,
+	}
+
+	warrants, _, _, err := svc.repository.List(ctx, filterParams, listParams)
+	if err != nil {
+		log.Ctx(ctx).Error().Err(err).
+			Str("filterParams", filterParams.String()).
+			Msg("failed to list policyGroup members for notification")
+		return
+	}
+	if len(warrants) == 0 {
+		log.Ctx(ctx).Info().
+			Str("filterParams", filterParams.String()).
+			Msg("no policyGroup members found for notification")
+		return
+	}
+
+	if updateAppForPolicyGroup {
+		for _, warrant := range warrants {
+			userId := warrant.GetSubjectId()
+			evt := event.NewAuthzChangeEvent(eventType, objectType, objectId, objecttype.ObjectTypeUser, userId, relation, orgId)
+			if err := event.PublishAuthzChangeEvent(ctx, evt); err != nil {
+				log.Ctx(ctx).Error().Err(err).
+					Msg("failed to publish authz change event for policyGroup app member")
+			}
+		}
+	} else if updateUserForPolicyGroup {
+		for _, warrant := range warrants {
+			appId := warrant.GetObjectId()
+			evt := event.NewAuthzChangeEvent(eventType, objecttype.ObjectTypeWorkspaceApp, appId, objecttype.ObjectTypeUser, subjectId, relation, orgId)
+			if err := event.PublishAuthzChangeEvent(ctx, evt); err != nil {
+				log.Error().Err(err).
+					Msg("failed to publish authz change event for policyGroup user member")
+			}
+		}
+	}
 }

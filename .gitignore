@@ -4,3 +4,4 @@ apirunner.conf
 bin/
 dist/
 .idea/
+warrant.log
