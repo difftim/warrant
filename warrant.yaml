@@ -22,6 +22,10 @@ datastore:
     hostname: localhost
     database: warrant
     sslmode: disable
+    maxIdleConnections: 50
+    connMaxIdleTime: 4h
+    maxOpenConnections: 100
+    connMaxLifetime: 6h
 grpc:
   client:
     mainServerHost: MainServersTestInternal-f8f83f8a4cdae750.elb.ap-southeast-1.amazonaws.com:55565

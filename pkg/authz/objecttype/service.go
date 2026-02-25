@@ -16,10 +16,14 @@ package authz
 
 import (
 	"context"
+	"time"
 
+	"github.com/rs/zerolog/log"
 	"github.com/warrant-dev/warrant/pkg/service"
 	"github.com/warrant-dev/warrant/pkg/wookie"
 )
+
+const DefaultObjectTypeCacheTTL = 12 * time.Hour
 
 type Service interface {
 	Create(ctx context.Context, spec CreateObjectTypeSpec) (*ObjectTypeSpec, *wookie.Token, error)
@@ -32,13 +36,17 @@ type Service interface {
 type ObjectTypeService struct {
 	service.BaseService
 	repository ObjectTypeRepository
+	cache      *objectTypeCache
 }
 
 func NewService(env service.Env, repository ObjectTypeRepository) *ObjectTypeService {
-	return &ObjectTypeService{
+	svc := &ObjectTypeService{
 		BaseService: service.NewBaseService(env),
 		repository:  repository,
+		cache:       newObjectTypeCache(DefaultObjectTypeCacheTTL),
 	}
+	log.Info().Msgf("init: objecttype cache enabled with TTL %s", DefaultObjectTypeCacheTTL)
+	return svc
 }
 
 func (svc ObjectTypeService) Create(ctx context.Context, spec CreateObjectTypeSpec) (*ObjectTypeSpec, *wookie.Token, error) {
@@ -73,6 +81,13 @@ func (svc ObjectTypeService) Create(ctx context.Context, spec CreateObjectTypeSp
 }
 
 func (svc ObjectTypeService) GetByTypeId(ctx context.Context, typeId string) (*ObjectTypeSpec, error) {
+	orgId := orgIdFromContext(ctx)
+	if orgId != "" {
+		if cached, ok := svc.cache.Get(orgId, typeId); ok {
+			return cached, nil
+		}
+	}
+
 	objectType, err := svc.repository.GetByTypeId(ctx, typeId)
 	if err != nil {
 		return nil, err
@@ -83,7 +98,21 @@ func (svc ObjectTypeService) GetByTypeId(ctx context.Context, typeId string) (*O
 		return nil, err
 	}
 
+	if orgId != "" {
+		svc.cache.Set(orgId, typeId, objectTypeSpec)
+	}
 	return objectTypeSpec, nil
+}
+
+func orgIdFromContext(ctx context.Context) string {
+	val := ctx.Value(wookie.OrgIdKey)
+	if val == nil {
+		return ""
+	}
+	if s, ok := val.(string); ok {
+		return s
+	}
+	return ""
 }
 
 func (svc ObjectTypeService) List(ctx context.Context, listParams service.ListParams) ([]ObjectTypeSpec, *service.Cursor, *service.Cursor, error) {
@@ -124,6 +153,8 @@ func (svc ObjectTypeService) UpdateByTypeId(ctx context.Context, typeId string, 
 			return err
 		}
 
+		svc.cache.InvalidateByTypeId(typeId)
+
 		updatedObjectTypeSpec, err = svc.GetByTypeId(txCtx, typeId)
 		if err != nil {
 			return err
@@ -144,6 +175,7 @@ func (svc ObjectTypeService) DeleteByTypeId(ctx context.Context, typeId string) 
 			return err
 		}
 
+		svc.cache.InvalidateByTypeId(typeId)
 		return nil
 	})
 	if err != nil {
@@ -152,4 +184,12 @@ func (svc ObjectTypeService) DeleteByTypeId(ctx context.Context, typeId string) 
 
 	//nolint:nilnil
 	return nil, nil
+}
+
+func (svc ObjectTypeService) FlushCache() int {
+	return svc.cache.Flush()
+}
+
+func (svc ObjectTypeService) CacheSize() int {
+	return svc.cache.Size()
 }

@@ -15,6 +15,7 @@
 package authz
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gorilla/mux"
@@ -98,6 +99,18 @@ func (svc ObjectTypeService) Routes() ([]service.Route, error) {
 			Method:  "DELETE",
 			Handler: service.NewRouteHandler(svc, deleteHandler),
 		},
+
+		// cache management
+		service.WarrantRoute{
+			Pattern: "/v1/object-types-cache/flush",
+			Method:  "POST",
+			Handler: service.NewRouteHandler(svc, flushCacheHandler),
+		},
+		service.WarrantRoute{
+			Pattern: "/v1/object-types-cache/stats",
+			Method:  "GET",
+			Handler: service.NewRouteHandler(svc, cacheStatsHandler),
+		},
 	}, nil
 }
 
@@ -180,5 +193,20 @@ func deleteHandler(svc ObjectTypeService, w http.ResponseWriter, r *http.Request
 
 	w.Header().Set("Content-type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	return nil
+}
+
+func flushCacheHandler(svc ObjectTypeService, w http.ResponseWriter, r *http.Request) error {
+	flushed := svc.FlushCache()
+	service.SendJSONResponse(w, map[string]interface{}{
+		"message": fmt.Sprintf("object type cache flushed, %d entries cleared", flushed),
+	})
+	return nil
+}
+
+func cacheStatsHandler(svc ObjectTypeService, w http.ResponseWriter, r *http.Request) error {
+	service.SendJSONResponse(w, map[string]interface{}{
+		"cacheSize": svc.CacheSize(),
+	})
 	return nil
 }
