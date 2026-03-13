@@ -95,7 +95,7 @@ func ShouldNotify(objectType, relation string) bool {
 // 只支持 user / org / policyGroup
 func IsSupportedSubjectType(subjectType string) bool {
 	switch subjectType {
-	case authz.ObjectTypeUser, authz.ObjectTypeOrg, authz.ObjectTypePolicyGroup:
+	case authz.ObjectTypeUser, authz.ObjectTypeOrg, authz.ObjectTypePolicyGroup, authz.ObjectTypePlatform:
 		return true
 	default:
 		return false
