@@ -18,9 +18,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/warrant-dev/warrant/pkg/wookie"
 	"regexp"
 	"strconv"
+	"strings"
+
+	"github.com/warrant-dev/warrant/pkg/wookie"
 
 	"github.com/pkg/errors"
 	"github.com/warrant-dev/warrant/pkg/database"
@@ -329,9 +331,12 @@ func (repo PostgresRepository) List(ctx context.Context, filterParams FilterPara
 		replacements = append(replacements, filterParams.SubjectRelation)
 	}
 
-	if orgId != "" {
-		query = fmt.Sprintf("%s AND org_id in (?,'*')", query)
-		replacements = append(replacements, orgId)
+	orgIDs := wookie.OrgIDFilterValues(ctx, orgId)
+	if len(orgIDs) > 0 {
+		query = fmt.Sprintf("%s AND org_id in (%s)", query, strings.TrimRight(strings.Repeat("?,", len(orgIDs)), ","))
+		for _, orgID := range orgIDs {
+			replacements = append(replacements, orgID)
+		}
 	}
 
 	if listParams.NextCursor != nil {
