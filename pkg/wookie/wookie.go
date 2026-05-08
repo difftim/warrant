@@ -25,8 +25,11 @@ const OrgIdHeaderName = "x-org-id"
 const Latest = "latest"
 const OrgIdKey = "orgId"
 const SupportCrossOrgKey = "supportCrossOrg"
+const PersonalOrgIdPrefix = "personal_"
+const IndividualOrgId = "individual"
 
 type warrantTokenCtxKey struct{}
+type individualOrgFallbackCtxKey struct{}
 
 func WarrantTokenMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -79,4 +82,24 @@ func ContainsLatest(ctx context.Context) bool {
 // Return a context with Warrant-Token set to 'latest'.
 func WithLatest(parent context.Context) context.Context {
 	return context.WithValue(parent, warrantTokenCtxKey{}, Latest)
+}
+
+func WithIndividualOrgFallback(parent context.Context) context.Context {
+	return context.WithValue(parent, individualOrgFallbackCtxKey{}, true)
+}
+
+func OrgIDFilterValues(ctx context.Context, orgID any) []string {
+	orgIDStr, ok := orgID.(string)
+	if !ok || orgIDStr == "" {
+		return nil
+	}
+
+	orgIDs := []string{orgIDStr}
+	if includeIndividual, ok := ctx.Value(individualOrgFallbackCtxKey{}).(bool); ok && includeIndividual && strings.HasPrefix(orgIDStr, PersonalOrgIdPrefix) {
+		orgIDs = append(orgIDs, IndividualOrgId)
+	}
+	if orgIDStr != "*" {
+		orgIDs = append(orgIDs, "*")
+	}
+	return orgIDs
 }

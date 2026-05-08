@@ -33,3 +33,20 @@ func TestBasicSerialization(t *testing.T) {
 		t.Fatalf("expected ctx to not contain 'latest' wookie")
 	}
 }
+
+func TestOrgIDFilterValuesIncludesIndividualForPersonalOrgWhenEnabled(t *testing.T) {
+	t.Parallel()
+	ctx := wookie.WithIndividualOrgFallback(context.Background())
+
+	orgIDs := wookie.OrgIDFilterValues(ctx, "personal_123")
+
+	expected := []string{"personal_123", "individual", "*"}
+	if len(orgIDs) != len(expected) {
+		t.Fatalf("expected %d org ids, got %d: %v", len(expected), len(orgIDs), orgIDs)
+	}
+	for i, expectedOrgID := range expected {
+		if orgIDs[i] != expectedOrgID {
+			t.Fatalf("expected org id %d to be %q, got %q", i, expectedOrgID, orgIDs[i])
+		}
+	}
+}

@@ -47,6 +47,7 @@ func (svc QueryService) Routes() ([]service.Route, error) {
 }
 
 func queryV1(svc QueryService, w http.ResponseWriter, r *http.Request) error {
+	ctx := wookie.WithIndividualOrgFallback(r.Context())
 	queryParams := r.URL.Query()
 	queryString := queryParams.Get("q")
 	query, err := NewQueryFromString(queryString)
@@ -79,7 +80,7 @@ func queryV1(svc QueryService, w http.ResponseWriter, r *http.Request) error {
 		listParams.WithNextCursor(afterIdCursor)
 	}
 
-	results, _, nextCursor, err := svc.Query(r.Context(), query, listParams)
+	results, _, nextCursor, err := svc.Query(ctx, query, listParams)
 	if err != nil {
 		return err
 	}
@@ -101,6 +102,7 @@ func queryV1(svc QueryService, w http.ResponseWriter, r *http.Request) error {
 }
 
 func queryV2(svc QueryService, w http.ResponseWriter, r *http.Request) error {
+	ctx := wookie.WithIndividualOrgFallback(r.Context())
 	queryParams := r.URL.Query()
 	queryString := queryParams.Get("q")
 	query, err := NewQueryFromString(queryString)
@@ -108,7 +110,7 @@ func queryV2(svc QueryService, w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 
-	syncUserRelationsOnQuery(r.Context(), svc, query)
+	syncUserRelationsOnQuery(ctx, svc, query)
 
 	if queryParams.Has("context") {
 		err = query.WithContext(queryParams.Get("context"))
@@ -118,7 +120,7 @@ func queryV2(svc QueryService, w http.ResponseWriter, r *http.Request) error {
 	}
 
 	listParams := service.GetListParamsFromContext[QueryListParamParser](r.Context())
-	results, prevCursor, nextCursor, err := svc.Query(r.Context(), query, listParams)
+	results, prevCursor, nextCursor, err := svc.Query(ctx, query, listParams)
 	if err != nil {
 		return err
 	}
