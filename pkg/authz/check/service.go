@@ -49,6 +49,7 @@ func defaultCreateCheckContext(ctx context.Context) (context.Context, error) {
 	if wookie.ContainsLatest(ctx) {
 		return wookie.WithLatest(checkCtx), nil
 	}
+	checkCtx = wookie.WithIndividualOrgFallback(checkCtx)
 	checkCtx = context.WithValue(checkCtx, wookie.OrgIdKey, ctx.Value(wookie.OrgIdKey))
 	checkCtx = context.WithValue(checkCtx, wookie.SupportCrossOrgKey, ctx.Value(wookie.SupportCrossOrgKey))
 	return checkCtx, nil
