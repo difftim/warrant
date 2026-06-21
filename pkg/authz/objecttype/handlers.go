@@ -21,7 +21,19 @@ import (
 	"github.com/warrant-dev/warrant/pkg/service"
 )
 
+// httpService 同时满足 object-type 业务方法与 service.Service 路由注册，
+// 使路由能绑定到具体实现（含 CachedService），避免方法提升把写请求 handler
+// 绑定到未装饰的底层 service 而绕过缓存失效。
+type httpService interface {
+	Service
+	service.Service
+}
+
 func (svc ObjectTypeService) Routes() ([]service.Route, error) {
+	return objectTypeRoutes(svc)
+}
+
+func objectTypeRoutes(svc httpService) ([]service.Route, error) {
 	return []service.Route{
 		// create
 		service.WarrantRoute{
@@ -101,7 +113,7 @@ func (svc ObjectTypeService) Routes() ([]service.Route, error) {
 	}, nil
 }
 
-func createHandler(svc ObjectTypeService, w http.ResponseWriter, r *http.Request) error {
+func createHandler(svc httpService, w http.ResponseWriter, r *http.Request) error {
 	var spec CreateObjectTypeSpec
 	err := service.ParseJSONBody(r.Context(), r.Body, &spec)
 	if err != nil {
@@ -117,7 +129,7 @@ func createHandler(svc ObjectTypeService, w http.ResponseWriter, r *http.Request
 	return nil
 }
 
-func listHandlerV1(svc ObjectTypeService, w http.ResponseWriter, r *http.Request) error {
+func listHandlerV1(svc httpService, w http.ResponseWriter, r *http.Request) error {
 	listParams := service.GetListParamsFromContext[ObjectTypeListParamParser](r.Context())
 	objectTypeSpecs, _, _, err := svc.List(r.Context(), listParams)
 	if err != nil {
@@ -128,7 +140,7 @@ func listHandlerV1(svc ObjectTypeService, w http.ResponseWriter, r *http.Request
 	return nil
 }
 
-func listHandlerV2(svc ObjectTypeService, w http.ResponseWriter, r *http.Request) error {
+func listHandlerV2(svc httpService, w http.ResponseWriter, r *http.Request) error {
 	listParams := service.GetListParamsFromContext[ObjectTypeListParamParser](r.Context())
 	objectTypeSpecs, prevCursor, nextCursor, err := svc.List(r.Context(), listParams)
 	if err != nil {
@@ -143,7 +155,7 @@ func listHandlerV2(svc ObjectTypeService, w http.ResponseWriter, r *http.Request
 	return nil
 }
 
-func getHandler(svc ObjectTypeService, w http.ResponseWriter, r *http.Request) error {
+func getHandler(svc httpService, w http.ResponseWriter, r *http.Request) error {
 	typeId := mux.Vars(r)["type"]
 	objectTypeSpec, err := svc.GetByTypeId(r.Context(), typeId)
 	if err != nil {
@@ -154,7 +166,7 @@ func getHandler(svc ObjectTypeService, w http.ResponseWriter, r *http.Request) e
 	return nil
 }
 
-func updateHandler(svc ObjectTypeService, w http.ResponseWriter, r *http.Request) error {
+func updateHandler(svc httpService, w http.ResponseWriter, r *http.Request) error {
 	var spec UpdateObjectTypeSpec
 	err := service.ParseJSONBody(r.Context(), r.Body, &spec)
 	if err != nil {
@@ -171,7 +183,7 @@ func updateHandler(svc ObjectTypeService, w http.ResponseWriter, r *http.Request
 	return nil
 }
 
-func deleteHandler(svc ObjectTypeService, w http.ResponseWriter, r *http.Request) error {
+func deleteHandler(svc httpService, w http.ResponseWriter, r *http.Request) error {
 	typeId := mux.Vars(r)["type"]
 	_, err := svc.DeleteByTypeId(r.Context(), typeId)
 	if err != nil {

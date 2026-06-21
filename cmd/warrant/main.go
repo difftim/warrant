@@ -28,6 +28,7 @@ import (
 	objecttype "github.com/warrant-dev/warrant/pkg/authz/objecttype"
 	query "github.com/warrant-dev/warrant/pkg/authz/query"
 	warrant "github.com/warrant-dev/warrant/pkg/authz/warrant"
+	"github.com/warrant-dev/warrant/pkg/cache"
 	"github.com/warrant-dev/warrant/pkg/config"
 	"github.com/warrant-dev/warrant/pkg/database"
 	kafkaproducer "github.com/warrant-dev/warrant/pkg/messaging/kafka"
@@ -143,12 +144,39 @@ func main() {
 	// init grpc clients
 	grpcClients.Start(cfg)
 
-	// Init object type repo and service
+	// init authz read cache (optional, off by default)
+	var cacheCfg cache.Config
+	if c := cfg.Cache; c != nil {
+		cacheCfg = cache.Config{
+			Enabled:      c.Enabled,
+			Address:      c.Address,
+			Username:     c.Username,
+			Password:     c.Password,
+			DB:           c.DB,
+			PoolSize:     c.PoolSize,
+			DialTimeout:  c.DialTimeout,
+			ReadTimeout:  c.ReadTimeout,
+			WriteTimeout: c.WriteTimeout,
+			DataTTL:      c.DataTTL,
+			VersionTTL:   c.VersionTTL,
+		}
+	}
+	authzCache, err := cache.New(cacheCfg)
+	if err != nil {
+		log.Fatal().Err(err).Msg("init: could not initialize authz cache. Shutting down.")
+	}
+	if authzCache.Enabled() {
+		log.Info().Msg("init: authz read cache enabled")
+	} else {
+		log.Info().Msg("init: authz read cache disabled")
+	}
+
+	// Init object type repo and service (wrapped with read cache + write invalidation)
 	objectTypeRepository, err := objecttype.NewRepository(svcEnv.DB())
 	if err != nil {
 		log.Fatal().Err(err).Msg("init: could not initialize ObjectTypeRepository")
 	}
-	objectTypeSvc := objecttype.NewService(svcEnv, objectTypeRepository)
+	objectTypeSvc := objecttype.NewCachedService(objecttype.NewService(svcEnv, objectTypeRepository), authzCache)
 
 	// Init object repo and service
 	objectRepository, err := object.NewRepository(svcEnv.DB())
@@ -157,41 +185,45 @@ func main() {
 	}
 	objectSvc := object.NewService(svcEnv, objectRepository)
 
-	// Init warrant repo and service
+	// Init warrant repo and service (wrapped with read cache + write invalidation)
 	warrantRepository, err := warrant.NewRepository(svcEnv.DB())
 	if err != nil {
 		log.Fatal().Err(err).Msg("init: could not initialize WarrantRepository")
 	}
-	warrantSvc := warrant.NewService(svcEnv, warrantRepository, objectTypeSvc, objectSvc)
+	warrantSvc := warrant.NewCachedService(warrant.NewService(svcEnv, warrantRepository, objectTypeSvc, objectSvc), authzCache)
+
+	// Wrap object service so that object deletes (which cascade-delete warrants)
+	// invalidate the warrant cache.
+	cachedObjectSvc := object.NewCachedService(objectSvc, warrantSvc)
 
 	// Init check service
 	checkSvc := check.NewService(svcEnv, warrantSvc, objectTypeSvc, cfg.Check, nil)
 
 	// Init query service
-	querySvc := query.NewService(svcEnv, objectTypeSvc, warrantSvc, objectSvc)
+	querySvc := query.NewService(svcEnv, objectTypeSvc, warrantSvc, cachedObjectSvc)
 
 	// Init feature service
-	featureSvc := feature.NewService(svcEnv, objectSvc)
+	featureSvc := feature.NewService(svcEnv, cachedObjectSvc)
 
 	// Init permission service
-	permissionSvc := permission.NewService(svcEnv, objectSvc)
+	permissionSvc := permission.NewService(svcEnv, cachedObjectSvc)
 
 	// Init pricing tier service
-	pricingTierSvc := pricingtier.NewService(svcEnv, objectSvc)
+	pricingTierSvc := pricingtier.NewService(svcEnv, cachedObjectSvc)
 
 	// Init role service
-	roleSvc := role.NewService(svcEnv, objectSvc)
+	roleSvc := role.NewService(svcEnv, cachedObjectSvc)
 
 	// Init tenant service
-	tenantSvc := tenant.NewService(svcEnv, objectSvc)
+	tenantSvc := tenant.NewService(svcEnv, cachedObjectSvc)
 
 	// Init user service
-	userSvc := user.NewService(svcEnv, objectSvc)
+	userSvc := user.NewService(svcEnv, cachedObjectSvc)
 
 	svcs := []service.Service{
 		checkSvc,
 		featureSvc,
-		objectSvc,
+		cachedObjectSvc,
 		objectTypeSvc,
 		permissionSvc,
 		pricingTierSvc,

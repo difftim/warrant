@@ -23,7 +23,19 @@ import (
 	"github.com/warrant-dev/warrant/pkg/service"
 )
 
+// httpService 同时满足 object 业务方法与 service.Service 路由注册，
+// 使路由能绑定到具体实现（含 CachedService），避免方法提升把删除 object
+// 的 handler 绑定到未装饰的底层 service 而绕过 warrant 缓存级联失效。
+type httpService interface {
+	Service
+	service.Service
+}
+
 func (svc ObjectService) Routes() ([]service.Route, error) {
+	return objectRoutes(svc)
+}
+
+func objectRoutes(svc httpService) ([]service.Route, error) {
 	return []service.Route{
 		// create
 		service.WarrantRoute{
@@ -112,7 +124,7 @@ func (svc ObjectService) Routes() ([]service.Route, error) {
 	}, nil
 }
 
-func createHandler(svc ObjectService, w http.ResponseWriter, r *http.Request) error {
+func createHandler(svc httpService, w http.ResponseWriter, r *http.Request) error {
 	var objectSpec CreateObjectSpec
 	err := service.ParseJSONBody(r.Context(), r.Body, &objectSpec)
 	if err != nil {
@@ -128,7 +140,7 @@ func createHandler(svc ObjectService, w http.ResponseWriter, r *http.Request) er
 	return nil
 }
 
-func listHandlerV1(svc ObjectService, w http.ResponseWriter, r *http.Request) error {
+func listHandlerV1(svc httpService, w http.ResponseWriter, r *http.Request) error {
 	listParams := service.GetListParamsFromContext[ObjectListParamParser](r.Context())
 	queryParams := r.URL.Query()
 	objectType, err := url.QueryUnescape(queryParams.Get("objectType"))
@@ -146,7 +158,7 @@ func listHandlerV1(svc ObjectService, w http.ResponseWriter, r *http.Request) er
 	return nil
 }
 
-func listHandlerV2(svc ObjectService, w http.ResponseWriter, r *http.Request) error {
+func listHandlerV2(svc httpService, w http.ResponseWriter, r *http.Request) error {
 	listParams := service.GetListParamsFromContext[ObjectListParamParser](r.Context())
 	queryParams := r.URL.Query()
 	objectType, err := url.QueryUnescape(queryParams.Get("objectType"))
@@ -168,7 +180,7 @@ func listHandlerV2(svc ObjectService, w http.ResponseWriter, r *http.Request) er
 	return nil
 }
 
-func listPolicyGroup(svc ObjectService, w http.ResponseWriter, r *http.Request) error {
+func listPolicyGroup(svc httpService, w http.ResponseWriter, r *http.Request) error {
 	listParams := service.GetListParamsFromContext[ObjectListParamParser](r.Context())
 	filterOptions := FilterOptions{ObjectType: authz.ObjectTypePolicyGroup}
 	objects, prevCursor, nextCursor, err := svc.ListPolicyGroup(r.Context(), &filterOptions, listParams)
@@ -183,7 +195,7 @@ func listPolicyGroup(svc ObjectService, w http.ResponseWriter, r *http.Request) 
 	return nil
 }
 
-func getHandler(svc ObjectService, w http.ResponseWriter, r *http.Request) error {
+func getHandler(svc httpService, w http.ResponseWriter, r *http.Request) error {
 	objectType := mux.Vars(r)["objectType"]
 	objectId := mux.Vars(r)["objectId"]
 	object, err := svc.GetByObjectTypeAndId(r.Context(), objectType, objectId)
@@ -195,7 +207,7 @@ func getHandler(svc ObjectService, w http.ResponseWriter, r *http.Request) error
 	return nil
 }
 
-func updateHandler(svc ObjectService, w http.ResponseWriter, r *http.Request) error {
+func updateHandler(svc httpService, w http.ResponseWriter, r *http.Request) error {
 	var updateObject UpdateObjectSpec
 	err := service.ParseJSONBody(r.Context(), r.Body, &updateObject)
 	if err != nil {
@@ -213,7 +225,7 @@ func updateHandler(svc ObjectService, w http.ResponseWriter, r *http.Request) er
 	return nil
 }
 
-func deleteHandler(svc ObjectService, w http.ResponseWriter, r *http.Request) error {
+func deleteHandler(svc httpService, w http.ResponseWriter, r *http.Request) error {
 	objectType := mux.Vars(r)["objectType"]
 	objectId := mux.Vars(r)["objectId"]
 	_, err := svc.DeleteByObjectTypeAndId(r.Context(), objectType, objectId)

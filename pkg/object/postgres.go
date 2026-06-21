@@ -192,7 +192,7 @@ func (repo PostgresRepository) BatchGetByObjectTypeAndIds(ctx context.Context, o
 
 func (repo PostgresRepository) List(ctx context.Context, filterOptions *FilterOptions, listParams service.ListParams) ([]Model, *service.Cursor, *service.Cursor, error) {
 	orgId := ctx.Value(wookie.OrgIdKey)
-	supportCrossOrg := ctx.Value(wookie.SupportCrossOrgKey).(bool)
+	supportCrossOrg, _ := ctx.Value(wookie.SupportCrossOrgKey).(bool)
 	if !supportCrossOrg && (orgId == nil || orgId == "") {
 		return nil, nil, nil, service.NewInvalidParameterError("orgId", "orgId is required")
 	}
@@ -558,7 +558,7 @@ func (repo PostgresRepository) DeleteWarrantsMatchingSubject(ctx context.Context
 
 func (repo PostgresRepository) GetPolicyGroupWarrantCount(ctx context.Context, objectIds []string) (map[string]PolicyGroupObjectCount, error) {
 	orgId := ctx.Value(wookie.OrgIdKey)
-	supportCrossOrg := ctx.Value(wookie.SupportCrossOrgKey).(bool)
+	supportCrossOrg, _ := ctx.Value(wookie.SupportCrossOrgKey).(bool)
 	if !supportCrossOrg && (orgId == nil || orgId == "") {
 		return nil, service.NewInvalidParameterError("orgId", "orgId must be set")
 	}

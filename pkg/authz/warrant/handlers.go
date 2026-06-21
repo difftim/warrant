@@ -22,7 +22,19 @@ import (
 	"github.com/warrant-dev/warrant/pkg/service"
 )
 
+// httpService 同时满足 warrant 业务方法与 service.Service 路由注册，
+// 使路由能绑定到具体实现（含 CachedService 缓存装饰器），避免方法提升
+// 把写请求 handler 绑定到未装饰的底层 service 而绕过缓存失效。
+type httpService interface {
+	Service
+	service.Service
+}
+
 func (svc WarrantService) Routes() ([]service.Route, error) {
+	return warrantRoutes(svc)
+}
+
+func warrantRoutes(svc httpService) ([]service.Route, error) {
 	return []service.Route{
 		// create
 		service.WarrantRoute{
@@ -108,7 +120,7 @@ func (svc WarrantService) Routes() ([]service.Route, error) {
 		},
 	}, nil
 }
-func createHandler(svc WarrantService, w http.ResponseWriter, r *http.Request) error {
+func createHandler(svc httpService, w http.ResponseWriter, r *http.Request) error {
 	var specs BatchWarrantSpec
 	ctx := r.Context()
 	err := service.ParseJSONBody(ctx, r.Body, &specs)
@@ -140,7 +152,7 @@ func createHandler(svc WarrantService, w http.ResponseWriter, r *http.Request) e
 	return nil
 }
 
-func listV1Handler(svc WarrantService, w http.ResponseWriter, r *http.Request) error {
+func listV1Handler(svc httpService, w http.ResponseWriter, r *http.Request) error {
 	warrants, _, _, err := svc.List(
 		r.Context(),
 		*buildFilterOptions(r),
@@ -154,11 +166,11 @@ func listV1Handler(svc WarrantService, w http.ResponseWriter, r *http.Request) e
 	return nil
 }
 
-func list4MgmtHandler(svc WarrantService, w http.ResponseWriter, r *http.Request) error {
+func list4MgmtHandler(svc httpService, w http.ResponseWriter, r *http.Request) error {
 	return listV2Handler(svc, w, r)
 }
 
-func listV2Handler(svc WarrantService, w http.ResponseWriter, r *http.Request) error {
+func listV2Handler(svc httpService, w http.ResponseWriter, r *http.Request) error {
 	warrants, prevCursor, nextCursor, err := svc.List(
 		r.Context(),
 		*buildFilterOptions(r),
@@ -176,7 +188,7 @@ func listV2Handler(svc WarrantService, w http.ResponseWriter, r *http.Request) e
 	return nil
 }
 
-func batchDeleteHandler(svc WarrantService, w http.ResponseWriter, r *http.Request) error {
+func batchDeleteHandler(svc httpService, w http.ResponseWriter, r *http.Request) error {
 	var specs BatchDeleteWarrantSpec
 	err := service.ParseJSONBody(r.Context(), r.Body, &specs)
 	if err != nil {
@@ -198,7 +210,7 @@ func batchDeleteHandler(svc WarrantService, w http.ResponseWriter, r *http.Reque
 	return nil
 }
 
-func deleteHandler(svc WarrantService, w http.ResponseWriter, r *http.Request) error {
+func deleteHandler(svc httpService, w http.ResponseWriter, r *http.Request) error {
 	var spec DeleteWarrantSpec
 	err := service.ParseJSONBody(r.Context(), r.Body, &spec)
 	if err != nil {
@@ -214,7 +226,7 @@ func deleteHandler(svc WarrantService, w http.ResponseWriter, r *http.Request) e
 	return nil
 }
 
-func deleteOneWarrant(svc WarrantService, context context.Context, spec DeleteWarrantSpec) error {
+func deleteOneWarrant(svc httpService, context context.Context, spec DeleteWarrantSpec) error {
 	if !spec.HasAnyValue() {
 		return service.NewInvalidParameterError("deleteParams", "must specify at least one of objectType or objectId or Subject")
 	}
@@ -226,7 +238,7 @@ func deleteOneWarrant(svc WarrantService, context context.Context, spec DeleteWa
 	return nil
 }
 
-func listAppsHandler(svc WarrantService, w http.ResponseWriter, r *http.Request) error {
+func listAppsHandler(svc httpService, w http.ResponseWriter, r *http.Request) error {
 	apps, err := svc.ListWarrantApps(r.Context())
 	if err != nil {
 		return err

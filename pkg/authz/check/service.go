@@ -24,6 +24,7 @@ import (
 	"github.com/rs/zerolog/log"
 	objecttype "github.com/warrant-dev/warrant/pkg/authz/objecttype"
 	warrant "github.com/warrant-dev/warrant/pkg/authz/warrant"
+	"github.com/warrant-dev/warrant/pkg/cache"
 	"github.com/warrant-dev/warrant/pkg/config"
 	"github.com/warrant-dev/warrant/pkg/service"
 	"github.com/warrant-dev/warrant/pkg/stats"
@@ -46,12 +47,17 @@ type CheckService struct {
 
 func defaultCreateCheckContext(ctx context.Context) (context.Context, error) {
 	checkCtx := stats.BlankContextWithRequestStats(ctx)
+	// org 隔离上下文（orgId / 是否允许跨 org）在 latest 与非 latest 路径都需要传递，
+	// 否则 repository.List 读不到这些值会判定 "orgId is required"（或对 nil 断言 panic）。
+	checkCtx = context.WithValue(checkCtx, wookie.OrgIdKey, ctx.Value(wookie.OrgIdKey))
+	checkCtx = context.WithValue(checkCtx, wookie.SupportCrossOrgKey, ctx.Value(wookie.SupportCrossOrgKey))
 	if wookie.ContainsLatest(ctx) {
+		// 'latest' 强一致请求直查 writer，不走缓存。
 		return wookie.WithLatest(checkCtx), nil
 	}
 	checkCtx = wookie.WithIndividualOrgFallback(checkCtx)
-	checkCtx = context.WithValue(checkCtx, wookie.OrgIdKey, ctx.Value(wookie.OrgIdKey))
-	checkCtx = context.WithValue(checkCtx, wookie.SupportCrossOrgKey, ctx.Value(wookie.SupportCrossOrgKey))
+	// 标记本次检查读路径允许走缓存（warrant.List / objecttype.GetByTypeId 装饰器据此启用）。
+	checkCtx = cache.WithReadThrough(checkCtx)
 	return checkCtx, nil
 }
 
