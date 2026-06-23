@@ -17,6 +17,7 @@ package object
 import (
 	"context"
 
+	"github.com/rs/zerolog/log"
 	"github.com/warrant-dev/warrant/pkg/service"
 	"github.com/warrant-dev/warrant/pkg/wookie"
 )
@@ -50,6 +51,9 @@ func (s *CachedService) Routes() ([]service.Route, error) {
 func (s *CachedService) DeleteByObjectTypeAndId(ctx context.Context, objectType string, objectId string) (*wookie.Token, error) {
 	token, err := s.ObjectService.DeleteByObjectTypeAndId(ctx, objectType, objectId)
 	if err == nil && s.invalidator != nil {
+		log.Ctx(ctx).Info().
+			Str("objectType", objectType).Str("objectId", objectId).
+			Msg("cache: object deleted -> cascade invalidate warrant cache (all)")
 		s.invalidator.InvalidateAll(ctx)
 	}
 	return token, err

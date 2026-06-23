@@ -55,7 +55,6 @@ type WarrantConfig struct {
 	Check           *CheckConfig            `mapstructure:"check"`
 	Grpc            *GrpcConfig             `mapstructure:"grpc"`
 	Kafka           *KafkaConfig            `mapstructure:"kafka"`
-	Cache           *CacheConfig            `mapstructure:"cache"`
 }
 
 func (warrantConfig WarrantConfig) GetPort() int {
@@ -88,10 +87,6 @@ func (warrantConfig WarrantConfig) GetAuthentication() *AuthConfig {
 
 func (warrantConfig WarrantConfig) GetCheck() *CheckConfig {
 	return warrantConfig.Check
-}
-
-func (warrantConfig WarrantConfig) GetCache() *CacheConfig {
-	return warrantConfig.Cache
 }
 
 type DatastoreConfig interface {
@@ -188,21 +183,6 @@ type GrpcClientConfig struct {
 	MainServerHost string `mapstructure:"mainServerHost"`
 }
 
-// CacheConfig 控制授权读路径的 Redis 缓存。默认关闭，便于灰度开启。
-type CacheConfig struct {
-	Enabled      bool          `mapstructure:"enabled"`
-	Address      string        `mapstructure:"address"`
-	Username     string        `mapstructure:"username"`
-	Password     string        `mapstructure:"password"`
-	DB           int           `mapstructure:"db"`
-	PoolSize     int           `mapstructure:"poolSize"`
-	DialTimeout  time.Duration `mapstructure:"dialTimeout"`
-	ReadTimeout  time.Duration `mapstructure:"readTimeout"`
-	WriteTimeout time.Duration `mapstructure:"writeTimeout"`
-	DataTTL      time.Duration `mapstructure:"dataTtl"`
-	VersionTTL   time.Duration `mapstructure:"versionTtl"`
-}
-
 type KafkaConfig struct {
 	Enabled          bool          `mapstructure:"enabled"`
 	Brokers          []string      `mapstructure:"brokers"`
@@ -255,15 +235,6 @@ func NewConfig() WarrantConfig {
 	viper.SetDefault("kafka.maxAttempts", 3)
 	viper.SetDefault("kafka.metadataTTL", 5*time.Minute)
 	viper.SetDefault("kafka.rebalanceTimeout", 30*time.Second)
-	viper.SetDefault("cache.enabled", false)
-	viper.SetDefault("cache.db", 0)
-	viper.SetDefault("cache.poolSize", 50)
-	viper.SetDefault("cache.dialTimeout", 5*time.Second)
-	viper.SetDefault("cache.readTimeout", 1*time.Second)
-	viper.SetDefault("cache.writeTimeout", 1*time.Second)
-	viper.SetDefault("cache.dataTtl", 10*time.Minute)
-	viper.SetDefault("cache.versionTtl", 24*time.Hour)
-
 	// If config file exists, use it
 	_, err := os.ReadFile(ConfigFileName)
 	if err == nil {

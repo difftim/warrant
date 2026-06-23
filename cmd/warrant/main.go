@@ -144,22 +144,12 @@ func main() {
 	// init grpc clients
 	grpcClients.Start(cfg)
 
-	// init authz read cache (optional, off by default)
-	var cacheCfg cache.Config
-	if c := cfg.Cache; c != nil {
-		cacheCfg = cache.Config{
-			Enabled:      c.Enabled,
-			Address:      c.Address,
-			Username:     c.Username,
-			Password:     c.Password,
-			DB:           c.DB,
-			PoolSize:     c.PoolSize,
-			DialTimeout:  c.DialTimeout,
-			ReadTimeout:  c.ReadTimeout,
-			WriteTimeout: c.WriteTimeout,
-			DataTTL:      c.DataTTL,
-			VersionTTL:   c.VersionTTL,
-		}
+	// init authz read cache (optional, off by default).
+	// 缓存配置独立于主 warrant.yaml，从 cache.yaml（或 WARRANT_CACHE_CONFIG 指定路径）加载；
+	// 文件不存在时缓存默认关闭。
+	cacheCfg, err := cache.LoadConfig("")
+	if err != nil {
+		log.Fatal().Err(err).Msg("init: could not load cache config. Shutting down.")
 	}
 	authzCache, err := cache.New(cacheCfg)
 	if err != nil {

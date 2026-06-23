@@ -111,28 +111,28 @@ func TestFilterBucketLimit(t *testing.T) {
 func TestBucketVersionKeyOrgIndependent(t *testing.T) {
 	// 版本号桶以 (objectType,objectId) 为键，与 org 无关：
 	// 一次写应能失效该桶的所有 org 变体。
-	k1 := bucketVersionKey("report", "r1")
-	k2 := bucketVersionKey("report", "r1")
+	k1 := bucketVersionKey("warrant:", "report", "r1")
+	k2 := bucketVersionKey("warrant:", "report", "r1")
 	if k1 != k2 {
 		t.Fatalf("version key must be stable for same (objectType,objectId)")
 	}
-	if bucketVersionKey("report", "r1") == bucketVersionKey("report", "r2") {
+	if bucketVersionKey("warrant:", "report", "r1") == bucketVersionKey("warrant:", "report", "r2") {
 		t.Fatalf("different objects must have different version keys")
 	}
 }
 
 func TestBucketDataKeyVariesByDimensions(t *testing.T) {
-	base := bucketDataKey(1, 1, "report", "r1", "orgA")
-	if base == bucketDataKey(2, 1, "report", "r1", "orgA") {
+	base := bucketDataKey("warrant:", 1, 1, "report", "r1", "orgA")
+	if base == bucketDataKey("warrant:", 2, 1, "report", "r1", "orgA") {
 		t.Fatalf("data key must change with epoch")
 	}
-	if base == bucketDataKey(1, 2, "report", "r1", "orgA") {
+	if base == bucketDataKey("warrant:", 1, 2, "report", "r1", "orgA") {
 		t.Fatalf("data key must change with version")
 	}
-	if base == bucketDataKey(1, 1, "report", "r1", "orgB") {
+	if base == bucketDataKey("warrant:", 1, 1, "report", "r1", "orgB") {
 		t.Fatalf("data key must change with org scope")
 	}
-	if base == bucketDataKey(1, 1, "report", "r2", "orgA") {
+	if base == bucketDataKey("warrant:", 1, 1, "report", "r2", "orgA") {
 		t.Fatalf("data key must change with objectId")
 	}
 }

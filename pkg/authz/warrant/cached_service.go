@@ -31,9 +31,6 @@ import (
 )
 
 const (
-	// warrantEpochKey 是全局 warrant 版本号。仅在无法枚举受影响桶的罕见写
-	// （通配符 object 的 warrant、object 删除级联）时 +1，触发全量失效。
-	warrantEpochKey = "wepoch"
 	// maxBucketSize 是单个 (objectType,objectId) 桶缓存的最大行数。
 	maxBucketSize = 100000
 )
@@ -61,10 +58,18 @@ func (s *CachedService) Routes() ([]service.Route, error) {
 	return warrantRoutes(s)
 }
 
+// epochKey 是全局 warrant 版本号 key。仅在无法枚举受影响桶的罕见写
+// （通配符 object 的 warrant、object 删除级联）时 +1，触发全量失效。
+func (s *CachedService) epochKey() string {
+	return s.cache.Prefix() + "wepoch"
+}
+
 // InvalidateAll 触发 warrant 缓存全量失效（供 object 删除级联等无法枚举桶的场景调用）。
 func (s *CachedService) InvalidateAll(ctx context.Context) {
 	if s.cache.Enabled() {
-		_ = s.cache.Incr(ctx, warrantEpochKey)
+		ek := s.epochKey()
+		log.Ctx(ctx).Info().Str("epochKey", ek).Msg("cache: warrant invalidateAll (epoch bump)")
+		_ = s.cache.Incr(ctx, ek)
 	}
 }
 
@@ -92,14 +97,27 @@ func (s *CachedService) invalidateBucket(ctx context.Context, objectType, object
 		return
 	}
 	if objectId == Wildcard || objectId == "" {
-		_ = s.cache.Incr(ctx, warrantEpochKey)
+		ek := s.epochKey()
+		log.Ctx(ctx).Info().
+			Str("objectType", objectType).Str("objectId", objectId).
+			Str("epochKey", ek).
+			Msg("cache: warrant write -> wildcard/empty objectId, invalidate all (epoch bump)")
+		_ = s.cache.Incr(ctx, ek)
 		return
 	}
-	_ = s.cache.Incr(ctx, bucketVersionKey(objectType, objectId))
+	vk := bucketVersionKey(s.cache.Prefix(), objectType, objectId)
+	log.Ctx(ctx).Info().
+		Str("objectType", objectType).Str("objectId", objectId).
+		Str("versionKey", vk).
+		Msg("cache: warrant write -> invalidate bucket (version bump)")
+	_ = s.cache.Incr(ctx, vk)
 }
 
 func (s *CachedService) List(ctx context.Context, filterParams FilterParams, listParams service.ListParams) ([]WarrantSpec, *service.Cursor, *service.Cursor, error) {
 	if !s.cacheable(ctx, filterParams, listParams) {
+		log.Ctx(ctx).Debug().
+			Str("objectType", filterParams.ObjectType).Str("objectId", filterParams.ObjectId).
+			Msg("cache: warrant List bypass (not cacheable)")
 		return s.WarrantService.List(ctx, filterParams, listParams)
 	}
 
@@ -107,15 +125,21 @@ func (s *CachedService) List(ctx context.Context, filterParams FilterParams, lis
 	objectId := filterParams.ObjectId
 	orgKey, hasOrg := orgScopeKey(ctx, filterParams)
 	if !hasOrg {
+		log.Ctx(ctx).Debug().
+			Str("objectType", objectType).Str("objectId", objectId).
+			Msg("cache: warrant List bypass (no org scope)")
 		return s.WarrantService.List(ctx, filterParams, listParams)
 	}
 
-	counters, ok := s.cache.GetCounters(ctx, warrantEpochKey, bucketVersionKey(objectType, objectId))
+	counters, ok := s.cache.GetCounters(ctx, s.epochKey(), bucketVersionKey(s.cache.Prefix(), objectType, objectId))
 	if !ok {
+		log.Ctx(ctx).Debug().
+			Str("objectType", objectType).Str("objectId", objectId).
+			Msg("cache: warrant List bypass (counters unavailable, falling back to DB)")
 		return s.WarrantService.List(ctx, filterParams, listParams)
 	}
 	epoch, version := counters[0], counters[1]
-	dataKey := bucketDataKey(epoch, version, objectType, objectId, orgKey)
+	dataKey := bucketDataKey(s.cache.Prefix(), epoch, version, objectType, objectId, orgKey)
 
 	var bucket []WarrantSpec
 	hit := false
@@ -123,7 +147,7 @@ func (s *CachedService) List(ctx context.Context, filterParams FilterParams, lis
 		if err := json.Unmarshal(vals[0], &bucket); err == nil {
 			hit = true
 		} else {
-			log.Ctx(ctx).Warn().Err(err).Msg("cache: corrupt warrant bucket, refetching")
+			log.Ctx(ctx).Warn().Err(err).Str("dataKey", dataKey).Msg("cache: corrupt warrant bucket, refetching")
 		}
 	}
 
@@ -137,8 +161,16 @@ func (s *CachedService) List(ctx context.Context, filterParams FilterParams, lis
 			s.cache.SetBytes(ctx, dataKey, b)
 		}
 		stats.IncrCacheMiss(ctx)
+		log.Ctx(ctx).Debug().
+			Str("objectType", objectType).Str("objectId", objectId).Str("orgKey", orgKey).
+			Int64("epoch", epoch).Int64("version", version).Str("dataKey", dataKey).
+			Int("rows", len(bucket)).Msg("cache: warrant bucket MISS (refilled from DB)")
 	} else {
 		stats.IncrCacheHit(ctx)
+		log.Ctx(ctx).Debug().
+			Str("objectType", objectType).Str("objectId", objectId).Str("orgKey", orgKey).
+			Int64("epoch", epoch).Int64("version", version).Str("dataKey", dataKey).
+			Int("rows", len(bucket)).Msg("cache: warrant bucket HIT")
 	}
 
 	return filterBucket(bucket, filterParams, listParams.Limit), nil, nil, nil
@@ -232,12 +264,13 @@ func orgScopeKey(ctx context.Context, fp FilterParams) (string, bool) {
 	return strings.Join(orgIDs, "|"), true
 }
 
-func bucketVersionKey(objectType, objectId string) string {
-	return "wv:" + bucketHash(objectType, objectId)
+func bucketVersionKey(prefix, objectType, objectId string) string {
+	return prefix + "wv:" + bucketHash(objectType, objectId)
 }
 
-func bucketDataKey(epoch, version int64, objectType, objectId, orgKey string) string {
-	return fmt.Sprintf("wd:%s:%s:%s",
+func bucketDataKey(prefix string, epoch, version int64, objectType, objectId, orgKey string) string {
+	return fmt.Sprintf("%swd:%s:%s:%s",
+		prefix,
 		strconv.FormatInt(epoch, 10),
 		strconv.FormatInt(version, 10),
 		bucketHash(objectType, objectId, orgKey),

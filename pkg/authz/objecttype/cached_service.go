@@ -26,9 +26,6 @@ import (
 	"github.com/warrant-dev/warrant/pkg/wookie"
 )
 
-// objectTypeEpochKey 是 object_type 定义的全局版本号。任何 object_type 写操作都会 +1，
-// 使旧版本缓存项变为孤儿（object_type 变更极少，全量失效完全可接受）。
-const objectTypeEpochKey = "oteepoch"
 
 // CachedService 在 ObjectTypeService 之上缓存 GetByTypeId（Check 路径高频调用），
 // 并在写操作提交后失效。object_type 无 org 维度，缓存值全局共享。
@@ -50,24 +47,33 @@ func (s *CachedService) Routes() ([]service.Route, error) {
 	return objectTypeRoutes(s)
 }
 
+// epochKey 是 object_type 定义的全局版本号 key。任何 object_type 写操作都会 +1，
+// 使旧版本缓存项变为孤儿（object_type 变更极少，全量失效完全可接受）。
+func (s *CachedService) epochKey() string {
+	return s.cache.Prefix() + "oteepoch"
+}
+
 func (s *CachedService) GetByTypeId(ctx context.Context, typeId string) (*ObjectTypeSpec, error) {
 	if !s.cache.Enabled() || !cache.IsReadThrough(ctx) || wookie.ContainsLatest(ctx) {
+		log.Ctx(ctx).Debug().Str("typeId", typeId).Msg("cache: object_type GetByTypeId bypass (disabled/not-read-through/latest)")
 		return s.ObjectTypeService.GetByTypeId(ctx, typeId)
 	}
 
-	counters, ok := s.cache.GetCounters(ctx, objectTypeEpochKey)
+	counters, ok := s.cache.GetCounters(ctx, s.epochKey())
 	if !ok {
+		log.Ctx(ctx).Debug().Str("typeId", typeId).Msg("cache: object_type GetByTypeId bypass (counter unavailable, falling back to DB)")
 		return s.ObjectTypeService.GetByTypeId(ctx, typeId)
 	}
-	dataKey := fmt.Sprintf("otd:%d:%s", counters[0], typeId)
+	dataKey := fmt.Sprintf("%sotd:%d:%s", s.cache.Prefix(), counters[0], typeId)
 
 	if vals, ok := s.cache.GetBytes(ctx, dataKey); ok && len(vals) == 1 && vals[0] != nil {
 		var spec ObjectTypeSpec
 		if err := json.Unmarshal(vals[0], &spec); err == nil {
 			stats.IncrCacheHit(ctx)
+			log.Ctx(ctx).Debug().Str("typeId", typeId).Int64("epoch", counters[0]).Str("dataKey", dataKey).Msg("cache: object_type HIT")
 			return &spec, nil
 		}
-		log.Ctx(ctx).Warn().Err(nil).Msg("cache: corrupt object_type entry, refetching")
+		log.Ctx(ctx).Warn().Str("dataKey", dataKey).Msg("cache: corrupt object_type entry, refetching")
 	}
 
 	spec, err := s.ObjectTypeService.GetByTypeId(ctx, typeId)
@@ -78,6 +84,7 @@ func (s *CachedService) GetByTypeId(ctx context.Context, typeId string) (*Object
 		s.cache.SetBytes(ctx, dataKey, b)
 	}
 	stats.IncrCacheMiss(ctx)
+	log.Ctx(ctx).Debug().Str("typeId", typeId).Int64("epoch", counters[0]).Str("dataKey", dataKey).Msg("cache: object_type MISS (refilled from DB)")
 	return spec, nil
 }
 
@@ -107,6 +114,8 @@ func (s *CachedService) DeleteByTypeId(ctx context.Context, typeId string) (*woo
 
 func (s *CachedService) invalidate(ctx context.Context) {
 	if s.cache.Enabled() {
-		_ = s.cache.Incr(ctx, objectTypeEpochKey)
+		ek := s.epochKey()
+		log.Ctx(ctx).Info().Str("epochKey", ek).Msg("cache: object_type write -> invalidate all (epoch bump)")
+		_ = s.cache.Incr(ctx, ek)
 	}
 }

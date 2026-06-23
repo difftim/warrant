@@ -54,21 +54,24 @@ func IsReadThrough(ctx context.Context) bool {
 }
 
 // Config 描述缓存的 Redis 连接与 TTL 配置。
+// 字段带 mapstructure tag，供 LoadConfig 从独立配置文件（cache.yaml）反序列化。
 type Config struct {
-	Enabled      bool
-	Address      string
-	Username     string
-	Password     string
-	DB           int
-	PoolSize     int
-	DialTimeout  time.Duration
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
+	Enabled      bool          `mapstructure:"enabled"`
+	Address      string        `mapstructure:"address"`
+	Username     string        `mapstructure:"username"`
+	Password     string        `mapstructure:"password"`
+	DB           int           `mapstructure:"db"`
+	PoolSize     int           `mapstructure:"poolSize"`
+	DialTimeout  time.Duration `mapstructure:"dialTimeout"`
+	ReadTimeout  time.Duration `mapstructure:"readTimeout"`
+	WriteTimeout time.Duration `mapstructure:"writeTimeout"`
 	// DataTTL 是缓存数据 key 的兜底过期时间（仅用于淘汰孤儿，不承担一致性）。
-	DataTTL time.Duration
+	DataTTL time.Duration `mapstructure:"dataTtl"`
 	// VersionTTL 是版本计数器 key 的过期时间，必须远大于 DataTTL，
 	// 以避免版本号过期后被复用、与仍在 TTL 内的旧 data key 撞号。
-	VersionTTL time.Duration
+	VersionTTL time.Duration `mapstructure:"versionTtl"`
+	// KeyPrefix 是所有缓存 key 的统一业务前缀（共享 Redis 命名空间隔离 / ACL / 运维清理）。
+	KeyPrefix string `mapstructure:"keyPrefix"`
 }
 
 // Cache 是对 Redis 的轻量封装，所有方法在未启用或底层报错时安全降级。
@@ -77,6 +80,7 @@ type Cache struct {
 	enabled    bool
 	dataTTL    time.Duration
 	versionTTL time.Duration
+	keyPrefix  string
 }
 
 // New 根据配置建立 Redis 连接。enabled=false 时返回一个永远降级的 Cache。
@@ -92,6 +96,10 @@ func New(cfg Config) (*Cache, error) {
 	versionTTL := cfg.VersionTTL
 	if versionTTL <= 0 {
 		versionTTL = 24 * time.Hour
+	}
+	keyPrefix := cfg.KeyPrefix
+	if keyPrefix == "" {
+		keyPrefix = DefaultKeyPrefix
 	}
 
 	rdb := redis.NewClient(&redis.Options{
@@ -116,12 +124,22 @@ func New(cfg Config) (*Cache, error) {
 		enabled:    true,
 		dataTTL:    dataTTL,
 		versionTTL: versionTTL,
+		keyPrefix:  keyPrefix,
 	}, nil
 }
 
 // Enabled 返回缓存是否可用。
 func (c *Cache) Enabled() bool {
 	return c != nil && c.enabled
+}
+
+// Prefix 返回缓存 key 的统一业务前缀。即使在降级（未启用）实例上也返回默认前缀，
+// 便于调用方在构造 key 时无条件使用。
+func (c *Cache) Prefix() string {
+	if c == nil || c.keyPrefix == "" {
+		return DefaultKeyPrefix
+	}
+	return c.keyPrefix
 }
 
 // GetCounters 一次性读取多个版本计数器（epoch / bucket version）。
@@ -133,7 +151,7 @@ func (c *Cache) GetCounters(ctx context.Context, keys ...string) (values []int64
 
 	res, err := c.rdb.MGet(ctx, keys...).Result()
 	if err != nil {
-		log.Ctx(ctx).Warn().Err(err).Msg("cache: GetCounters MGet failed, falling back to DB")
+		log.Ctx(ctx).Warn().Err(err).Strs("keys", keys).Msg("cache: GetCounters MGet failed, falling back to DB")
 		return nil, false
 	}
 
@@ -141,6 +159,7 @@ func (c *Cache) GetCounters(ctx context.Context, keys ...string) (values []int64
 	for i, v := range res {
 		values[i] = toInt64(v)
 	}
+	log.Ctx(ctx).Debug().Strs("keys", keys).Ints64("values", values).Msg("cache: GetCounters ok")
 	return values, true
 }
 
@@ -153,21 +172,25 @@ func (c *Cache) GetBytes(ctx context.Context, keys ...string) (values [][]byte, 
 
 	res, err := c.rdb.MGet(ctx, keys...).Result()
 	if err != nil {
-		log.Ctx(ctx).Warn().Err(err).Msg("cache: GetBytes MGet failed, falling back to DB")
+		log.Ctx(ctx).Warn().Err(err).Strs("keys", keys).Msg("cache: GetBytes MGet failed, falling back to DB")
 		return nil, false
 	}
 
 	values = make([][]byte, len(res))
+	hits := 0
 	for i, v := range res {
 		switch val := v.(type) {
 		case string:
 			values[i] = []byte(val)
+			hits++
 		case []byte:
 			values[i] = val
+			hits++
 		default:
 			values[i] = nil
 		}
 	}
+	log.Ctx(ctx).Debug().Strs("keys", keys).Int("hits", hits).Int("total", len(keys)).Msg("cache: GetBytes ok")
 	return values, true
 }
 
@@ -177,8 +200,10 @@ func (c *Cache) SetBytes(ctx context.Context, key string, val []byte) {
 		return
 	}
 	if err := c.rdb.Set(ctx, key, val, c.dataTTL).Err(); err != nil {
-		log.Ctx(ctx).Warn().Err(err).Msg("cache: SetBytes failed")
+		log.Ctx(ctx).Warn().Err(err).Str("key", key).Int("bytes", len(val)).Msg("cache: SetBytes failed")
+		return
 	}
+	log.Ctx(ctx).Debug().Str("key", key).Int("bytes", len(val)).Dur("ttl", c.dataTTL).Msg("cache: SetBytes ok (bucket refilled)")
 }
 
 // Incr 对版本计数器 +1 并刷新其 TTL。这是失效的唯一手段：旧版本 data key 随之变为孤儿。
@@ -188,12 +213,13 @@ func (c *Cache) Incr(ctx context.Context, key string) error {
 		return nil
 	}
 	pipe := c.rdb.TxPipeline()
-	pipe.Incr(ctx, key)
+	incr := pipe.Incr(ctx, key)
 	pipe.Expire(ctx, key, c.versionTTL)
 	if _, err := pipe.Exec(ctx); err != nil {
 		log.Ctx(ctx).Error().Err(err).Str("key", key).Msg("cache: Incr failed, cache may briefly serve stale until DataTTL")
 		return err
 	}
+	log.Ctx(ctx).Info().Str("key", key).Int64("newVersion", incr.Val()).Msg("cache: invalidate ok (counter incremented)")
 	return nil
 }
 
