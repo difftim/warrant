@@ -18,9 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"hash/fnv"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/rs/zerolog/log"
@@ -264,24 +262,13 @@ func orgScopeKey(ctx context.Context, fp FilterParams) (string, bool) {
 	return strings.Join(orgIDs, "|"), true
 }
 
+// key 一律使用明文拼接（不做 hash），便于在 Redis 中直接按对象类型/对象ID 排查问题。
+// 注意：objectType/objectId 约定为标识符，正常不含冒号；orgKey 由 org 列表用 '|' 连接。
+
 func bucketVersionKey(prefix, objectType, objectId string) string {
-	return prefix + "wv:" + bucketHash(objectType, objectId)
+	return fmt.Sprintf("%swv:%s:%s", prefix, objectType, objectId)
 }
 
 func bucketDataKey(prefix string, epoch, version int64, objectType, objectId, orgKey string) string {
-	return fmt.Sprintf("%swd:%s:%s:%s",
-		prefix,
-		strconv.FormatInt(epoch, 10),
-		strconv.FormatInt(version, 10),
-		bucketHash(objectType, objectId, orgKey),
-	)
-}
-
-func bucketHash(parts ...string) string {
-	h := fnv.New64a()
-	for _, p := range parts {
-		_, _ = h.Write([]byte(p))
-		_, _ = h.Write([]byte{0})
-	}
-	return strconv.FormatUint(h.Sum64(), 36)
+	return fmt.Sprintf("%swd:%d:%d:%s:%s:%s", prefix, epoch, version, objectType, objectId, orgKey)
 }
