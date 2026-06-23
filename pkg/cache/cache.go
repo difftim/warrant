@@ -53,8 +53,11 @@ func IsReadThrough(ctx context.Context) bool {
 	return ok && v
 }
 
+// DefaultKeyPrefix 是所有缓存 key 的默认业务前缀。
+const DefaultKeyPrefix = "warrant:"
+
 // Config 描述缓存的 Redis 连接与 TTL 配置。
-// 字段带 mapstructure tag，供 LoadConfig 从独立配置文件（cache.yaml）反序列化。
+// 字段带 mapstructure tag，由主配置（warrant.yaml 的 cache 段）反序列化映射。
 type Config struct {
 	Enabled      bool          `mapstructure:"enabled"`
 	Address      string        `mapstructure:"address"`
