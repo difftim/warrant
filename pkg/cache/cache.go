@@ -32,6 +32,7 @@ package cache
 import (
 	"context"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -78,8 +79,14 @@ type Config struct {
 }
 
 // Cache 是对 Redis 的轻量封装，所有方法在未启用或底层报错时安全降级。
+// 底层使用 UniversalClient，单机 / 哨兵 / 集群三种拓扑统一适配：
+//   - Address 配单个地址 → 单机客户端；
+//   - Address 配多个地址（逗号分隔）→ 集群客户端，自动跟随 MOVED/ASK 重定向。
+//
+// 集群下严禁跨 slot 的多键命令（MGET/MSET 等），因此批量读改用 Pipeline 逐 key GET，
+// 由客户端按节点分组下发，天然跨 slot 安全。
 type Cache struct {
-	rdb        *redis.Client
+	rdb        redis.UniversalClient
 	enabled    bool
 	dataTTL    time.Duration
 	versionTTL time.Duration
@@ -105,8 +112,16 @@ func New(cfg Config) (*Cache, error) {
 		keyPrefix = DefaultKeyPrefix
 	}
 
-	rdb := redis.NewClient(&redis.Options{
-		Addr:         cfg.Address,
+	// Address 支持逗号分隔的多地址：单个 → 单机；多个 → 集群（NewUniversalClient 自动识别）。
+	addrs := make([]string, 0, 4)
+	for _, a := range strings.Split(cfg.Address, ",") {
+		if a = strings.TrimSpace(a); a != "" {
+			addrs = append(addrs, a)
+		}
+	}
+
+	rdb := redis.NewUniversalClient(&redis.UniversalOptions{
+		Addrs:        addrs,
 		Username:     cfg.Username,
 		Password:     cfg.Password,
 		DB:           cfg.DB,
@@ -152,15 +167,30 @@ func (c *Cache) GetCounters(ctx context.Context, keys ...string) (values []int64
 		return nil, false
 	}
 
-	res, err := c.rdb.MGet(ctx, keys...).Result()
-	if err != nil {
-		log.Ctx(ctx).Warn().Err(err).Strs("keys", keys).Msg("cache: GetCounters MGet failed, falling back to DB")
+	// 集群下 MGET 跨 slot 会报 CROSSSLOT，改用 Pipeline 逐 key GET：
+	// 客户端按 slot/节点自动分组下发，单机与集群都适用。
+	pipe := c.rdb.Pipeline()
+	cmds := make([]*redis.StringCmd, len(keys))
+	for i, k := range keys {
+		cmds[i] = pipe.Get(ctx, k)
+	}
+	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+		log.Ctx(ctx).Warn().Err(err).Strs("keys", keys).Msg("cache: GetCounters pipeline failed, falling back to DB")
 		return nil, false
 	}
 
-	values = make([]int64, len(res))
-	for i, v := range res {
-		values[i] = toInt64(v)
+	values = make([]int64, len(keys))
+	for i, cmd := range cmds {
+		v, err := cmd.Result()
+		switch {
+		case err == redis.Nil:
+			values[i] = 0 // 计数器不存在记为 0
+		case err != nil:
+			log.Ctx(ctx).Warn().Err(err).Str("key", keys[i]).Msg("cache: GetCounters get failed, falling back to DB")
+			return nil, false
+		default:
+			values[i] = toInt64(v)
+		}
 	}
 	log.Ctx(ctx).Debug().Strs("keys", keys).Ints64("values", values).Msg("cache: GetCounters ok")
 	return values, true
@@ -173,24 +203,30 @@ func (c *Cache) GetBytes(ctx context.Context, keys ...string) (values [][]byte, 
 		return nil, false
 	}
 
-	res, err := c.rdb.MGet(ctx, keys...).Result()
-	if err != nil {
-		log.Ctx(ctx).Warn().Err(err).Strs("keys", keys).Msg("cache: GetBytes MGet failed, falling back to DB")
+	// 同 GetCounters：集群下用 Pipeline 逐 key GET 规避 CROSSSLOT。
+	pipe := c.rdb.Pipeline()
+	cmds := make([]*redis.StringCmd, len(keys))
+	for i, k := range keys {
+		cmds[i] = pipe.Get(ctx, k)
+	}
+	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+		log.Ctx(ctx).Warn().Err(err).Strs("keys", keys).Msg("cache: GetBytes pipeline failed, falling back to DB")
 		return nil, false
 	}
 
-	values = make([][]byte, len(res))
+	values = make([][]byte, len(keys))
 	hits := 0
-	for i, v := range res {
-		switch val := v.(type) {
-		case string:
-			values[i] = []byte(val)
-			hits++
-		case []byte:
-			values[i] = val
-			hits++
+	for i, cmd := range cmds {
+		b, err := cmd.Bytes()
+		switch {
+		case err == redis.Nil:
+			values[i] = nil // 未命中
+		case err != nil:
+			log.Ctx(ctx).Warn().Err(err).Str("key", keys[i]).Msg("cache: GetBytes get failed, falling back to DB")
+			return nil, false
 		default:
-			values[i] = nil
+			values[i] = b
+			hits++
 		}
 	}
 	log.Ctx(ctx).Debug().Strs("keys", keys).Int("hits", hits).Int("total", len(keys)).Msg("cache: GetBytes ok")

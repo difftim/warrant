@@ -31,7 +31,7 @@ grpc:
 # object 删除 / 通配符写触发全局 epoch 全量失效，读路径严格一致。
 cache:
   enabled: false
-  address: "localhost:6379"
+  address: "localhost:6379"   # 单机填一个；Redis Cluster 填多个种子节点，逗号分隔，如 "h1:6379,h2:6379,h3:6379"
   username: ""
   password:
   db: 0
