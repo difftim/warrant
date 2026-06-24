@@ -202,7 +202,7 @@ func main() {
 	checkSvc := check.NewService(svcEnv, warrantSvc, objectTypeSvc, cfg.Check, nil)
 
 	// Init query service
-	querySvc := query.NewService(svcEnv, objectTypeSvc, warrantSvc, cachedObjectSvc)
+	querySvc := query.NewService(svcEnv, objectTypeSvc, warrantSvc, cachedObjectSvc, authzCache)
 
 	// Init feature service
 	featureSvc := feature.NewService(svcEnv, cachedObjectSvc)

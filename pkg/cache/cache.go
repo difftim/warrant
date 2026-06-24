@@ -209,20 +209,41 @@ func (c *Cache) SetBytes(ctx context.Context, key string, val []byte) {
 	log.Ctx(ctx).Debug().Str("key", key).Int("bytes", len(val)).Dur("ttl", c.dataTTL).Msg("cache: SetBytes ok (bucket refilled)")
 }
 
+// SetNXMarker 以 NX 方式尝试写入一个短期标记 key，用作幂等/去重护栏。
+//   - 返回 true：本次成功抢占（key 此前不存在），调用方应继续执行被保护的动作。
+//   - 返回 false：key 已存在（TTL 窗口内近期已执行过），调用方应跳过。
+//
+// 缓存未启用或 Redis 出错时返回 true（降级为"不去重、照常执行"，绝不因去重而丢正确性）。
+func (c *Cache) SetNXMarker(ctx context.Context, key string, ttl time.Duration) bool {
+	if !c.Enabled() {
+		return true
+	}
+	ok, err := c.rdb.SetNX(ctx, key, 1, ttl).Result()
+	if err != nil {
+		log.Ctx(ctx).Warn().Err(err).Str("key", key).Msg("cache: SetNX marker failed, proceeding without dedupe")
+		return true
+	}
+	return ok
+}
+
 // Incr 对版本计数器 +1 并刷新其 TTL。这是失效的唯一手段：旧版本 data key 随之变为孤儿。
 // 错误会被记录；调用方（写路径）应在缓存失效失败时依赖 DataTTL 兜底收敛。
 func (c *Cache) Incr(ctx context.Context, key string) error {
 	if !c.Enabled() {
 		return nil
 	}
-	pipe := c.rdb.TxPipeline()
-	incr := pipe.Incr(ctx, key)
-	pipe.Expire(ctx, key, c.versionTTL)
-	if _, err := pipe.Exec(ctx); err != nil {
+	// 不用 MULTI/EXEC（TxPipeline）：事务里任一命令排队报错会整体返回 EXECABORT，
+	// 把真实根因（NOPERM/OOM/READONLY 等）掩盖掉。拆成两条独立命令，错误才能透出来。
+	newVersion, err := c.rdb.Incr(ctx, key).Result()
+	if err != nil {
 		log.Ctx(ctx).Error().Err(err).Str("key", key).Msg("cache: Incr failed, cache may briefly serve stale until DataTTL")
 		return err
 	}
-	log.Ctx(ctx).Info().Str("key", key).Int64("newVersion", incr.Val()).Msg("cache: invalidate ok (counter incremented)")
+	log.Ctx(ctx).Info().Str("key", key).Int64("newVersion", newVersion).Msg("cache: invalidate ok (counter incremented)")
+	// EXPIRE 仅为兜底回收孤儿计数器，失败不影响失效语义，记 warn 即可。
+	if err := c.rdb.Expire(ctx, key, c.versionTTL).Err(); err != nil {
+		log.Ctx(ctx).Warn().Err(err).Str("key", key).Dur("ttl", c.versionTTL).Msg("cache: Expire version key failed, it may persist longer")
+	}
 	return nil
 }
 

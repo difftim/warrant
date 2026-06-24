@@ -39,8 +39,8 @@ cache:
   dialTimeout: 5s
   readTimeout: 1s
   writeTimeout: 1s
-  dataTtl: 10m            # 数据 key 兜底过期（仅淘汰孤儿，不承担一致性）
-  versionTtl: 24h        # 版本号 key 过期，必须远大于 dataTtl
+  dataTtl: 24h            # 数据 key 兜底过期（仅淘汰孤儿，不承担一致性）
+  versionTtl: 168h       # 版本号 key 过期（=7d），必须远大于 dataTtl
   keyPrefix: "warrant:"  # 所有缓存 key 的统一业务前缀
 
 kafka:
