@@ -188,6 +188,7 @@ type GrpcClientConfig struct {
 type CacheConfig struct {
 	Enabled      bool          `mapstructure:"enabled"`
 	Address      string        `mapstructure:"address"`
+	Cluster      bool          `mapstructure:"cluster"`
 	Username     string        `mapstructure:"username"`
 	Password     string        `mapstructure:"password"`
 	DB           int           `mapstructure:"db"`
@@ -253,6 +254,7 @@ func NewConfig() WarrantConfig {
 	viper.SetDefault("kafka.metadataTTL", 5*time.Minute)
 	viper.SetDefault("kafka.rebalanceTimeout", 30*time.Second)
 	viper.SetDefault("cache.enabled", false)
+	viper.SetDefault("cache.cluster", false)
 	viper.SetDefault("cache.db", 0)
 	viper.SetDefault("cache.poolSize", 50)
 	viper.SetDefault("cache.dialTimeout", 5*time.Second)

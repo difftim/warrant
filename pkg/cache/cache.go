@@ -60,8 +60,11 @@ const DefaultKeyPrefix = "warrant:"
 // Config 描述缓存的 Redis 连接与 TTL 配置。
 // 字段带 mapstructure tag，由主配置（warrant.yaml 的 cache 段）反序列化映射。
 type Config struct {
-	Enabled      bool          `mapstructure:"enabled"`
-	Address      string        `mapstructure:"address"`
+	Enabled bool   `mapstructure:"enabled"`
+	Address string `mapstructure:"address"`
+	// Cluster 强制使用 Redis Cluster 客户端：true 时即使只配一个种子地址，
+	// 也会主动拉取集群拓扑并跟随 MOVED/ASK 路由（不依赖"地址个数 > 1"的隐式判断）。
+	Cluster      bool          `mapstructure:"cluster"`
 	Username     string        `mapstructure:"username"`
 	Password     string        `mapstructure:"password"`
 	DB           int           `mapstructure:"db"`
@@ -112,7 +115,7 @@ func New(cfg Config) (*Cache, error) {
 		keyPrefix = DefaultKeyPrefix
 	}
 
-	// Address 支持逗号分隔的多地址：单个 → 单机；多个 → 集群（NewUniversalClient 自动识别）。
+	// Address 支持逗号分隔的多地址。
 	addrs := make([]string, 0, 4)
 	for _, a := range strings.Split(cfg.Address, ",") {
 		if a = strings.TrimSpace(a); a != "" {
@@ -120,7 +123,7 @@ func New(cfg Config) (*Cache, error) {
 		}
 	}
 
-	rdb := redis.NewUniversalClient(&redis.UniversalOptions{
+	universalOpts := &redis.UniversalOptions{
 		Addrs:        addrs,
 		Username:     cfg.Username,
 		Password:     cfg.Password,
@@ -129,7 +132,17 @@ func New(cfg Config) (*Cache, error) {
 		DialTimeout:  cfg.DialTimeout,
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
-	})
+	}
+
+	// cluster=true 时显式走集群客户端：单种子地址也能自动发现整个集群、跟随 MOVED/ASK 重定向，
+	// 彻底规避 NewUniversalClient "地址数==1 即判为单机、不跟随重定向" 的隐式陷阱。
+	// cluster=false 时维持自动判断：单地址=单机，多地址=集群。
+	var rdb redis.UniversalClient
+	if cfg.Cluster {
+		rdb = redis.NewClusterClient(universalOpts.Cluster())
+	} else {
+		rdb = redis.NewUniversalClient(universalOpts)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

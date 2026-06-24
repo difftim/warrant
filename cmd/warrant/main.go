@@ -151,6 +151,7 @@ func main() {
 		cacheCfg = cache.Config{
 			Enabled:      c.Enabled,
 			Address:      c.Address,
+			Cluster:      c.Cluster,
 			Username:     c.Username,
 			Password:     c.Password,
 			DB:           c.DB,
