@@ -37,6 +37,9 @@ const (
 	InheritIfAllOf  = "allOf"
 	InheritIfAnyOf  = "anyOf"
 	InheritIfNoneOf = "noneOf"
+
+	// RelationDenied 黑名单关系：资源级硬拒绝，user 作为 subject 命中后即使有正向授权也无权限
+	RelationDenied = "denied"
 )
 
 type ObjectTypeSpec struct {

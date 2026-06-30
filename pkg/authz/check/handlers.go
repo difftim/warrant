@@ -113,6 +113,24 @@ func authorize4UserHandler(svc CheckService, w http.ResponseWriter, r *http.Requ
 	}
 
 	if checkUserSpec.BizType == BizTypeWorkspaceAppAccess {
+		// deny-override（黑名单）预检：仅针对 workspaceApp，用户对该 app 被显式拉黑时直接拒绝。
+		// 必须放在正向 anyOf 检查之前，因为正向授权可能来自 org / imGroup 路径（subject 不是 user），
+		// 仅靠 Check 内部按 subject 维度的 deny 判断无法拦截这些路径。
+		if checkUserSpec.Resource.ResType == objecttype.ObjectTypeWorkspaceApp {
+			denied, err := svc.isUserDenied(r.Context(), resolveResourceObjectId(checkUserSpec), checkUserSpec.UserId)
+			if err != nil {
+				return err
+			}
+			if denied {
+				service.SendJSONResponse(w, &CheckResultSpec{
+					Code:       http.StatusForbidden,
+					Result:     NotAuthorized,
+					IsImplicit: false,
+				})
+				return nil
+			}
+		}
+
 		orgId, imGroupIds, err := adaptor.GetUserIds(checkUserSpec.UserId, true, true)
 		if err != nil {
 			return err
@@ -139,14 +157,17 @@ func authorize4UserHandler(svc CheckService, w http.ResponseWriter, r *http.Requ
 	return errors.New("unsupported bizType:" + string(checkUserSpec.BizType))
 }
 
-func buildWarrantSpecs(checkUserSpec CheckUserSpec, orgId string, imGroupIds []string) []CheckWarrantSpec {
-	var objectId string
+// resolveResourceObjectId 计算待鉴权资源的 objectId（Resource.Id 为空时使用占位符）。
+func resolveResourceObjectId(checkUserSpec CheckUserSpec) string {
 	if checkUserSpec.Resource.Id != "" {
-		objectId = checkUserSpec.Resource.Id
-	} else {
-		//todo
-		objectId = "xxxx"
+		return checkUserSpec.Resource.Id
 	}
+	//todo
+	return "xxxx"
+}
+
+func buildWarrantSpecs(checkUserSpec CheckUserSpec, orgId string, imGroupIds []string) []CheckWarrantSpec {
+	objectId := resolveResourceObjectId(checkUserSpec)
 
 	warrantSpecs := make([]CheckWarrantSpec, 0)
 

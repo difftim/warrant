@@ -205,6 +205,12 @@ func (svc QueryService) Query(ctx context.Context, query Query, listParams servi
 		}
 	}
 
+	// 黑名单过滤：剔除被显式拉黑的 (资源, user) 组合，使查询结果反映有效权限。
+	queryResults, err := svc.filterDeniedResults(ctx, query, queryResults)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
 	// handle sorting and pagination
 	switch listParams.SortBy {
 	case PrimarySortKey:
@@ -319,6 +325,97 @@ func (svc QueryService) Query(ctx context.Context, query Query, listParams servi
 	}
 
 	return paginatedQueryResults, prevCursor, nextCursor, nil
+}
+
+// filterDeniedResults 对查询结果做黑名单（denied）过滤，仅针对 workspaceApp：
+//   - selectObjects（查某 user 可访问的 workspaceApp）：剔除该 user 被拉黑的 app；
+//   - selectSubjects（查某 workspaceApp 下的 user）：剔除被拉黑的 user。
+//
+// 黑名单为 app 级（workspaceApp:appId#denied@user:userId），仅对 user 主体生效。
+func (svc QueryService) filterDeniedResults(ctx context.Context, query Query, results []QueryResult) ([]QueryResult, error) {
+	if query.SelectObjects != nil &&
+		query.SelectObjects.WhereSubject != nil &&
+		query.SelectObjects.WhereSubject.Type == objecttype.ObjectTypeUser &&
+		query.SelectObjects.WhereSubject.Id != "" {
+		deniedApps, err := svc.deniedAppsForUser(ctx, query.SelectObjects.WhereSubject.Id)
+		if err != nil {
+			return nil, err
+		}
+		if len(deniedApps) > 0 {
+			filtered := make([]QueryResult, 0, len(results))
+			for _, res := range results {
+				if res.ObjectType == objecttype.ObjectTypeWorkspaceApp && deniedApps[res.ObjectId] {
+					continue
+				}
+				filtered = append(filtered, res)
+			}
+			results = filtered
+		}
+	}
+
+	if query.SelectSubjects != nil &&
+		query.SelectSubjects.ForObject != nil &&
+		query.SelectSubjects.ForObject.Type == objecttype.ObjectTypeWorkspaceApp &&
+		query.SelectSubjects.ForObject.Id != "" {
+		deniedUsers, err := svc.deniedUsersForApp(ctx, query.SelectSubjects.ForObject.Id)
+		if err != nil {
+			return nil, err
+		}
+		if len(deniedUsers) > 0 {
+			filtered := make([]QueryResult, 0, len(results))
+			for _, res := range results {
+				if res.ObjectType == objecttype.ObjectTypeUser && deniedUsers[res.ObjectId] {
+					continue
+				}
+				filtered = append(filtered, res)
+			}
+			results = filtered
+		}
+	}
+
+	return results, nil
+}
+
+// deniedAppsForUser 返回某 user 被拉黑的所有 workspaceApp id 集合。
+func (svc QueryService) deniedAppsForUser(ctx context.Context, userId string) (map[string]bool, error) {
+	listParams := service.DefaultListParams(warrant.WarrantListParamParser{})
+	listParams.WithLimit(MaxEdges)
+	deniedWarrants, _, _, err := svc.warrantSvc.List(ctx, warrant.FilterParams{
+		ObjectType:  objecttype.ObjectTypeWorkspaceApp,
+		Relation:    objecttype.RelationDenied,
+		SubjectType: objecttype.ObjectTypeUser,
+		SubjectId:   userId,
+	}, listParams)
+	if err != nil {
+		return nil, err
+	}
+
+	denied := make(map[string]bool, len(deniedWarrants))
+	for _, w := range deniedWarrants {
+		denied[w.ObjectId] = true
+	}
+	return denied, nil
+}
+
+// deniedUsersForApp 返回某 workspaceApp 下被拉黑的所有 userId 集合。
+func (svc QueryService) deniedUsersForApp(ctx context.Context, workspaceAppId string) (map[string]bool, error) {
+	listParams := service.DefaultListParams(warrant.WarrantListParamParser{})
+	listParams.WithLimit(MaxEdges)
+	deniedWarrants, _, _, err := svc.warrantSvc.List(ctx, warrant.FilterParams{
+		ObjectType:  objecttype.ObjectTypeWorkspaceApp,
+		ObjectId:    workspaceAppId,
+		Relation:    objecttype.RelationDenied,
+		SubjectType: objecttype.ObjectTypeUser,
+	}, listParams)
+	if err != nil {
+		return nil, err
+	}
+
+	denied := make(map[string]bool, len(deniedWarrants))
+	for _, w := range deniedWarrants {
+		denied[w.Subject.ObjectId] = true
+	}
+	return denied, nil
 }
 
 func (svc QueryService) query(ctx context.Context, query Query, level int) (*ResultSet, error) {

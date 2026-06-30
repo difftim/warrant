@@ -240,6 +240,12 @@ func (svc WarrantService) notifyAuthzChange(ctx context.Context, objectType, obj
 		return
 	}
 
+	// 黑名单（denied）语义与有效权限相反：新增 denied = 撤销权限，删除 denied = 恢复权限，
+	// 因此向下游发送通知时需要反转事件类型。
+	if relation == objecttype.RelationDenied {
+		eventType = event.InvertEventType(eventType)
+	}
+
 	// 特殊处理：workspaceApp -> policyGroup 授权变更
 	if subjectType == objecttype.ObjectTypePolicyGroup || objectType == objecttype.ObjectTypePolicyGroup {
 		svc.notifyPolicyGroupMembers(ctx, objectType, objectId, subjectType, subjectId, relation, orgId, eventType)
