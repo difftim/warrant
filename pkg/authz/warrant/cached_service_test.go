@@ -136,3 +136,45 @@ func TestBucketDataKeyVariesByDimensions(t *testing.T) {
 		t.Fatalf("data key must change with objectId")
 	}
 }
+
+func TestSubjectVersionKeyDimensions(t *testing.T) {
+	// subject 桶版本号以 (objectType,subjectType,subjectId) 为键，与 org 无关。
+	k1 := subjectVersionKey("warrant:", "report", "user", "u1")
+	k2 := subjectVersionKey("warrant:", "report", "user", "u1")
+	if k1 != k2 {
+		t.Fatalf("version key must be stable for same (objectType,subjectType,subjectId)")
+	}
+	base := k1
+	if base == subjectVersionKey("warrant:", "doc", "user", "u1") {
+		t.Fatalf("different objectType must have different version keys")
+	}
+	if base == subjectVersionKey("warrant:", "report", "group", "u1") {
+		t.Fatalf("different subjectType must have different version keys")
+	}
+	if base == subjectVersionKey("warrant:", "report", "user", "u2") {
+		t.Fatalf("different subjectId must have different version keys")
+	}
+}
+
+func TestSubjectDataKeyVariesByDimensions(t *testing.T) {
+	base := subjectDataKey("warrant:", 1, 1, "report", "user", "u1", "orgA")
+	if base == subjectDataKey("warrant:", 2, 1, "report", "user", "u1", "orgA") {
+		t.Fatalf("data key must change with epoch")
+	}
+	if base == subjectDataKey("warrant:", 1, 2, "report", "user", "u1", "orgA") {
+		t.Fatalf("data key must change with version")
+	}
+	if base == subjectDataKey("warrant:", 1, 1, "doc", "user", "u1", "orgA") {
+		t.Fatalf("data key must change with objectType")
+	}
+	if base == subjectDataKey("warrant:", 1, 1, "report", "user", "u2", "orgA") {
+		t.Fatalf("data key must change with subjectId")
+	}
+	if base == subjectDataKey("warrant:", 1, 1, "report", "user", "u1", "orgB") {
+		t.Fatalf("data key must change with org scope")
+	}
+	// object 桶与 subject 桶的 key 空间不得重叠。
+	if bucketDataKey("warrant:", 1, 1, "report", "r1", "orgA") == subjectDataKey("warrant:", 1, 1, "report", "r1", "orgA", "") {
+		t.Fatalf("object/subject bucket key spaces must not collide")
+	}
+}

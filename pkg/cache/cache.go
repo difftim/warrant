@@ -42,8 +42,8 @@ import (
 type readThroughCtxKey struct{}
 
 // WithReadThrough 标记该 context 上的读操作允许走缓存。
-// 仅授权检查（Check）路径会设置此标记；管理类 List/Get（需要游标、事务内读最新值）
-// 不设置，从而自动绕过缓存、直查 DB。
+// 授权检查（Check）与查询（Query）路径会设置此标记；管理类 List/Get
+//（需要游标、事务内读最新值）不设置，从而自动绕过缓存、直查 DB。
 func WithReadThrough(ctx context.Context) context.Context {
 	return context.WithValue(ctx, readThroughCtxKey{}, true)
 }
