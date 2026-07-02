@@ -188,28 +188,6 @@ func listV2Handler(svc httpService, w http.ResponseWriter, r *http.Request) erro
 	return nil
 }
 
-func batchDeleteHandler(svc WarrantService, w http.ResponseWriter, r *http.Request) error {
-	var specs BatchDeleteWarrantSpec
-	err := service.ParseJSONBody(r.Context(), r.Body, &specs)
-	if err != nil {
-		return err
-	}
-
-	if len(specs.Warrants) == 0 || len(specs.Warrants) >= MaxDeleteCountLimit {
-		return service.NewInvalidParameterError("deleteSize", "batch delete size must be less than 500 and greater than 1")
-	}
-
-	for _, spec := range specs.Warrants {
-		err = deleteOneWarrant(svc, r.Context(), spec)
-		if err != nil {
-			return err
-		}
-	}
-
-	service.SendJSONResponse(w, NewSuccessEmptyResponse())
-	return nil
-}
-
 func batchDeleteHandler(svc httpService, w http.ResponseWriter, r *http.Request) error {
 	var specs BatchDeleteWarrantSpec
 	err := service.ParseJSONBody(r.Context(), r.Body, &specs)
