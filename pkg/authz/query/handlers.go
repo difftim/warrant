@@ -22,6 +22,7 @@ import (
 	"github.com/rs/zerolog/log"
 	objecttype "github.com/warrant-dev/warrant/pkg/authz/objecttype"
 	authz "github.com/warrant-dev/warrant/pkg/authz/warrant"
+	"github.com/warrant-dev/warrant/pkg/cache"
 	"github.com/warrant-dev/warrant/pkg/service"
 	"github.com/warrant-dev/warrant/pkg/wookie"
 )
@@ -29,6 +30,18 @@ import (
 // syncMarkerTTL 是 syncUserRelationsOnQuery 去重护栏的窗口：同一 (org,user) 在该窗口内
 // 只会触发一次"懒同步"写（及一次缓存失效），避免每次查询都打掉该 org 的 warrant 缓存。
 const syncMarkerTTL = 24 * time.Hour
+
+// queryReadContext 构造 query 读路径的 context：与 Check 路径一致，标记 read-through，
+// 使图遍历中的 warrant.List / objecttype.GetByTypeId 走各自装饰器的桶缓存
+// （复用现有版本失效机制，不缓存 query 结果本身）。
+// 'latest' 强一致请求保持直查 DB，不打标记。
+func queryReadContext(r *http.Request) context.Context {
+	ctx := wookie.WithIndividualOrgFallback(r.Context())
+	if wookie.ContainsLatest(ctx) {
+		return ctx
+	}
+	return cache.WithReadThrough(ctx)
+}
 
 func (svc QueryService) Routes() ([]service.Route, error) {
 	return []service.Route{
@@ -52,7 +65,7 @@ func (svc QueryService) Routes() ([]service.Route, error) {
 }
 
 func queryV1(svc QueryService, w http.ResponseWriter, r *http.Request) error {
-	ctx := wookie.WithIndividualOrgFallback(r.Context())
+	ctx := queryReadContext(r)
 	queryParams := r.URL.Query()
 	queryString := queryParams.Get("q")
 	query, err := NewQueryFromString(queryString)
@@ -107,7 +120,7 @@ func queryV1(svc QueryService, w http.ResponseWriter, r *http.Request) error {
 }
 
 func queryV2(svc QueryService, w http.ResponseWriter, r *http.Request) error {
-	ctx := wookie.WithIndividualOrgFallback(r.Context())
+	ctx := queryReadContext(r)
 	queryParams := r.URL.Query()
 	queryString := queryParams.Get("q")
 	query, err := NewQueryFromString(queryString)
