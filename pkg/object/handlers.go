@@ -180,21 +180,6 @@ func listHandlerV2(svc httpService, w http.ResponseWriter, r *http.Request) erro
 	return nil
 }
 
-func listPolicyGroup(svc ObjectService, w http.ResponseWriter, r *http.Request) error {
-	listParams := service.GetListParamsFromContext[ObjectListParamParser](r.Context())
-	filterOptions := FilterOptions{ObjectType: authz.ObjectTypePolicyGroup}
-	objects, prevCursor, nextCursor, err := svc.ListPolicyGroup(r.Context(), &filterOptions, listParams)
-	if err != nil {
-		return err
-	}
-	service.SendJSONResponse(w, PolicyGroupListSpec{
-		Results:    objects,
-		PrevCursor: prevCursor,
-		NextCursor: nextCursor,
-	})
-	return nil
-}
-
 func listPolicyGroup(svc httpService, w http.ResponseWriter, r *http.Request) error {
 	listParams := service.GetListParamsFromContext[ObjectListParamParser](r.Context())
 	filterOptions := FilterOptions{ObjectType: authz.ObjectTypePolicyGroup}
