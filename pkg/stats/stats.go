@@ -106,6 +106,20 @@ func RecordStat(ctx context.Context, store string, tag string, start time.Time) 
 	}
 }
 
+// IncrCacheHit records a cache hit on the per-request stats, if present.
+func IncrCacheHit(ctx context.Context) {
+	if reqStats, ok := ctx.Value(requestStatsKey{}).(*RequestStats); ok {
+		reqStats.RecordStat(Stat{Store: "cache", Tag: "hit"})
+	}
+}
+
+// IncrCacheMiss records a cache miss on the per-request stats, if present.
+func IncrCacheMiss(ctx context.Context) {
+	if reqStats, ok := ctx.Value(requestStatsKey{}).(*RequestStats); ok {
+		reqStats.RecordStat(Stat{Store: "cache", Tag: "miss"})
+	}
+}
+
 // Returns a new context with given crumb appended to existing tag, if present. Otherwise, tracks the new tag in returned context. Useful for adding breadcrumbs to a Stat prior to a recording it.
 func ContextWithTagCrumb(ctx context.Context, crumb string) context.Context {
 	if tag, ok := ctx.Value(statTagKey{}).(string); ok {

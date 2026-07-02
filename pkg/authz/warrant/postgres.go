@@ -284,7 +284,7 @@ func (repo PostgresRepository) List(ctx context.Context, filterParams FilterPara
 	if orgId == nil || orgId == "" {
 		orgId = filterParams.OrgId
 	}
-	supportCrossOrg := ctx.Value(wookie.SupportCrossOrgKey).(bool)
+	supportCrossOrg, _ := ctx.Value(wookie.SupportCrossOrgKey).(bool)
 	if !supportCrossOrg && (orgId == nil || orgId == "") {
 		return nil, nil, nil, service.NewInvalidParameterError("orgId", "orgId is required")
 	}
@@ -519,7 +519,7 @@ func (repo PostgresRepository) List(ctx context.Context, filterParams FilterPara
 
 func (repo PostgresRepository) ListWarrantApps(ctx context.Context) ([]*WarrantApp, error) {
 	orgId := ctx.Value(wookie.OrgIdKey)
-	supportCrossOrg := ctx.Value(wookie.SupportCrossOrgKey).(bool)
+	supportCrossOrg, _ := ctx.Value(wookie.SupportCrossOrgKey).(bool)
 	if !supportCrossOrg && (orgId == nil || orgId == "") {
 		return nil, service.NewInvalidParameterError("orgId", "orgId is required")
 	}

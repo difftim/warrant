@@ -1,0 +1,314 @@
+// Copyright 2024 WorkOS, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Package cache 提供一个基于 Redis 的通用缓存原语，供授权读路径使用。
+//
+// 一致性模型（重点）：
+//   - 缓存值的 key 中嵌入"版本号"（epoch / bucket version）。
+//   - 任何写操作只需对相关计数器执行 INCR，旧版本对应的 data key 立即变为
+//     不可达的"孤儿"，从而：
+//     1) 失效与写提交同步（写服务在事务提交后、返回前同步 INCR）；
+//     2) 天然化解 cache-aside 回填竞态——慢读把旧值回填到旧版本 key 上，
+//        但后续读使用新版本号，永远读不到这个孤儿，因此不会出现"撤销后仍读到旧授权"。
+//   - 跨 Redis/DB 两套系统无法做到绝对原子，仅在"提交完成到 INCR 完成"这段
+//     亚毫秒窗口内，对那些与本次写无因果关系的并发读可能短暂命中旧值；对已知
+//     本次写结果的调用方（read-your-writes）严格一致。这是不依赖 2PC 时可达到
+//     的最强实际保证。
+//
+// 任何 Redis 错误都不会影响业务正确性：调用方在缓存不可用时回退直查 DB。
+package cache
+
+import (
+	"context"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/redis/go-redis/v9"
+	"github.com/rs/zerolog/log"
+)
+
+type readThroughCtxKey struct{}
+
+// WithReadThrough 标记该 context 上的读操作允许走缓存。
+// 仅授权检查（Check）路径会设置此标记；管理类 List/Get（需要游标、事务内读最新值）
+// 不设置，从而自动绕过缓存、直查 DB。
+func WithReadThrough(ctx context.Context) context.Context {
+	return context.WithValue(ctx, readThroughCtxKey{}, true)
+}
+
+// IsReadThrough 返回该 context 是否允许走缓存。
+func IsReadThrough(ctx context.Context) bool {
+	v, ok := ctx.Value(readThroughCtxKey{}).(bool)
+	return ok && v
+}
+
+// DefaultKeyPrefix 是所有缓存 key 的默认业务前缀。
+const DefaultKeyPrefix = "warrant:"
+
+// Config 描述缓存的 Redis 连接与 TTL 配置。
+// 字段带 mapstructure tag，由主配置（warrant.yaml 的 cache 段）反序列化映射。
+type Config struct {
+	Enabled bool   `mapstructure:"enabled"`
+	Address string `mapstructure:"address"`
+	// Cluster 强制使用 Redis Cluster 客户端：true 时即使只配一个种子地址，
+	// 也会主动拉取集群拓扑并跟随 MOVED/ASK 路由（不依赖"地址个数 > 1"的隐式判断）。
+	Cluster      bool          `mapstructure:"cluster"`
+	Username     string        `mapstructure:"username"`
+	Password     string        `mapstructure:"password"`
+	DB           int           `mapstructure:"db"`
+	PoolSize     int           `mapstructure:"poolSize"`
+	DialTimeout  time.Duration `mapstructure:"dialTimeout"`
+	ReadTimeout  time.Duration `mapstructure:"readTimeout"`
+	WriteTimeout time.Duration `mapstructure:"writeTimeout"`
+	// DataTTL 是缓存数据 key 的兜底过期时间（仅用于淘汰孤儿，不承担一致性）。
+	DataTTL time.Duration `mapstructure:"dataTtl"`
+	// VersionTTL 是版本计数器 key 的过期时间，必须远大于 DataTTL，
+	// 以避免版本号过期后被复用、与仍在 TTL 内的旧 data key 撞号。
+	VersionTTL time.Duration `mapstructure:"versionTtl"`
+	// KeyPrefix 是所有缓存 key 的统一业务前缀（共享 Redis 命名空间隔离 / ACL / 运维清理）。
+	KeyPrefix string `mapstructure:"keyPrefix"`
+}
+
+// Cache 是对 Redis 的轻量封装，所有方法在未启用或底层报错时安全降级。
+// 底层使用 UniversalClient，单机 / 哨兵 / 集群三种拓扑统一适配：
+//   - Address 配单个地址 → 单机客户端；
+//   - Address 配多个地址（逗号分隔）→ 集群客户端，自动跟随 MOVED/ASK 重定向。
+//
+// 集群下严禁跨 slot 的多键命令（MGET/MSET 等），因此批量读改用 Pipeline 逐 key GET，
+// 由客户端按节点分组下发，天然跨 slot 安全。
+type Cache struct {
+	rdb        redis.UniversalClient
+	enabled    bool
+	dataTTL    time.Duration
+	versionTTL time.Duration
+	keyPrefix  string
+}
+
+// New 根据配置建立 Redis 连接。enabled=false 时返回一个永远降级的 Cache。
+func New(cfg Config) (*Cache, error) {
+	if !cfg.Enabled {
+		return &Cache{enabled: false}, nil
+	}
+
+	dataTTL := cfg.DataTTL
+	if dataTTL <= 0 {
+		dataTTL = 10 * time.Minute
+	}
+	versionTTL := cfg.VersionTTL
+	if versionTTL <= 0 {
+		versionTTL = 24 * time.Hour
+	}
+	keyPrefix := cfg.KeyPrefix
+	if keyPrefix == "" {
+		keyPrefix = DefaultKeyPrefix
+	}
+
+	// Address 支持逗号分隔的多地址。
+	addrs := make([]string, 0, 4)
+	for _, a := range strings.Split(cfg.Address, ",") {
+		if a = strings.TrimSpace(a); a != "" {
+			addrs = append(addrs, a)
+		}
+	}
+
+	universalOpts := &redis.UniversalOptions{
+		Addrs:        addrs,
+		Username:     cfg.Username,
+		Password:     cfg.Password,
+		DB:           cfg.DB,
+		PoolSize:     cfg.PoolSize,
+		DialTimeout:  cfg.DialTimeout,
+		ReadTimeout:  cfg.ReadTimeout,
+		WriteTimeout: cfg.WriteTimeout,
+	}
+
+	// cluster=true 时显式走集群客户端：单种子地址也能自动发现整个集群、跟随 MOVED/ASK 重定向，
+	// 彻底规避 NewUniversalClient "地址数==1 即判为单机、不跟随重定向" 的隐式陷阱。
+	// cluster=false 时维持自动判断：单地址=单机，多地址=集群。
+	var rdb redis.UniversalClient
+	if cfg.Cluster {
+		rdb = redis.NewClusterClient(universalOpts.Cluster())
+	} else {
+		rdb = redis.NewUniversalClient(universalOpts)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := rdb.Ping(ctx).Err(); err != nil {
+		return nil, err
+	}
+
+	return &Cache{
+		rdb:        rdb,
+		enabled:    true,
+		dataTTL:    dataTTL,
+		versionTTL: versionTTL,
+		keyPrefix:  keyPrefix,
+	}, nil
+}
+
+// Enabled 返回缓存是否可用。
+func (c *Cache) Enabled() bool {
+	return c != nil && c.enabled
+}
+
+// Prefix 返回缓存 key 的统一业务前缀。即使在降级（未启用）实例上也返回默认前缀，
+// 便于调用方在构造 key 时无条件使用。
+func (c *Cache) Prefix() string {
+	if c == nil || c.keyPrefix == "" {
+		return DefaultKeyPrefix
+	}
+	return c.keyPrefix
+}
+
+// GetCounters 一次性读取多个版本计数器（epoch / bucket version）。
+// 不存在的 key 记为 0。任何错误返回 ok=false，调用方据此回退直查 DB。
+func (c *Cache) GetCounters(ctx context.Context, keys ...string) (values []int64, ok bool) {
+	if !c.Enabled() || len(keys) == 0 {
+		return nil, false
+	}
+
+	// 集群下 MGET 跨 slot 会报 CROSSSLOT，改用 Pipeline 逐 key GET：
+	// 客户端按 slot/节点自动分组下发，单机与集群都适用。
+	pipe := c.rdb.Pipeline()
+	cmds := make([]*redis.StringCmd, len(keys))
+	for i, k := range keys {
+		cmds[i] = pipe.Get(ctx, k)
+	}
+	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+		log.Ctx(ctx).Warn().Err(err).Strs("keys", keys).Msg("cache: GetCounters pipeline failed, falling back to DB")
+		return nil, false
+	}
+
+	values = make([]int64, len(keys))
+	for i, cmd := range cmds {
+		v, err := cmd.Result()
+		switch {
+		case err == redis.Nil:
+			values[i] = 0 // 计数器不存在记为 0
+		case err != nil:
+			log.Ctx(ctx).Warn().Err(err).Str("key", keys[i]).Msg("cache: GetCounters get failed, falling back to DB")
+			return nil, false
+		default:
+			values[i] = toInt64(v)
+		}
+	}
+	log.Ctx(ctx).Debug().Strs("keys", keys).Ints64("values", values).Msg("cache: GetCounters ok")
+	return values, true
+}
+
+// GetBytes 批量读取多个 data key，返回与 keys 等长的结果；未命中项为 nil。
+// 任何错误返回 ok=false。
+func (c *Cache) GetBytes(ctx context.Context, keys ...string) (values [][]byte, ok bool) {
+	if !c.Enabled() || len(keys) == 0 {
+		return nil, false
+	}
+
+	// 同 GetCounters：集群下用 Pipeline 逐 key GET 规避 CROSSSLOT。
+	pipe := c.rdb.Pipeline()
+	cmds := make([]*redis.StringCmd, len(keys))
+	for i, k := range keys {
+		cmds[i] = pipe.Get(ctx, k)
+	}
+	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+		log.Ctx(ctx).Warn().Err(err).Strs("keys", keys).Msg("cache: GetBytes pipeline failed, falling back to DB")
+		return nil, false
+	}
+
+	values = make([][]byte, len(keys))
+	hits := 0
+	for i, cmd := range cmds {
+		b, err := cmd.Bytes()
+		switch {
+		case err == redis.Nil:
+			values[i] = nil // 未命中
+		case err != nil:
+			log.Ctx(ctx).Warn().Err(err).Str("key", keys[i]).Msg("cache: GetBytes get failed, falling back to DB")
+			return nil, false
+		default:
+			values[i] = b
+			hits++
+		}
+	}
+	log.Ctx(ctx).Debug().Strs("keys", keys).Int("hits", hits).Int("total", len(keys)).Msg("cache: GetBytes ok")
+	return values, true
+}
+
+// SetBytes 写入一个 data key，带 DataTTL 兜底过期。错误仅记录不阻断。
+func (c *Cache) SetBytes(ctx context.Context, key string, val []byte) {
+	if !c.Enabled() {
+		return
+	}
+	if err := c.rdb.Set(ctx, key, val, c.dataTTL).Err(); err != nil {
+		log.Ctx(ctx).Warn().Err(err).Str("key", key).Int("bytes", len(val)).Msg("cache: SetBytes failed")
+		return
+	}
+	log.Ctx(ctx).Debug().Str("key", key).Int("bytes", len(val)).Dur("ttl", c.dataTTL).Msg("cache: SetBytes ok (bucket refilled)")
+}
+
+// SetNXMarker 以 NX 方式尝试写入一个短期标记 key，用作幂等/去重护栏。
+//   - 返回 true：本次成功抢占（key 此前不存在），调用方应继续执行被保护的动作。
+//   - 返回 false：key 已存在（TTL 窗口内近期已执行过），调用方应跳过。
+//
+// 缓存未启用或 Redis 出错时返回 true（降级为"不去重、照常执行"，绝不因去重而丢正确性）。
+func (c *Cache) SetNXMarker(ctx context.Context, key string, ttl time.Duration) bool {
+	if !c.Enabled() {
+		return true
+	}
+	ok, err := c.rdb.SetNX(ctx, key, 1, ttl).Result()
+	if err != nil {
+		log.Ctx(ctx).Warn().Err(err).Str("key", key).Msg("cache: SetNX marker failed, proceeding without dedupe")
+		return true
+	}
+	return ok
+}
+
+// Incr 对版本计数器 +1 并刷新其 TTL。这是失效的唯一手段：旧版本 data key 随之变为孤儿。
+// 错误会被记录；调用方（写路径）应在缓存失效失败时依赖 DataTTL 兜底收敛。
+func (c *Cache) Incr(ctx context.Context, key string) error {
+	if !c.Enabled() {
+		return nil
+	}
+	// 不用 MULTI/EXEC（TxPipeline）：事务里任一命令排队报错会整体返回 EXECABORT，
+	// 把真实根因（NOPERM/OOM/READONLY 等）掩盖掉。拆成两条独立命令，错误才能透出来。
+	newVersion, err := c.rdb.Incr(ctx, key).Result()
+	if err != nil {
+		log.Ctx(ctx).Error().Err(err).Str("key", key).Msg("cache: Incr failed, cache may briefly serve stale until DataTTL")
+		return err
+	}
+	log.Ctx(ctx).Info().Str("key", key).Int64("newVersion", newVersion).Msg("cache: invalidate ok (counter incremented)")
+	// EXPIRE 仅为兜底回收孤儿计数器，失败不影响失效语义，记 warn 即可。
+	if err := c.rdb.Expire(ctx, key, c.versionTTL).Err(); err != nil {
+		log.Ctx(ctx).Warn().Err(err).Str("key", key).Dur("ttl", c.versionTTL).Msg("cache: Expire version key failed, it may persist longer")
+	}
+	return nil
+}
+
+func toInt64(v interface{}) int64 {
+	switch val := v.(type) {
+	case nil:
+		return 0
+	case int64:
+		return val
+	case string:
+		n, err := strconv.ParseInt(val, 10, 64)
+		if err != nil {
+			return 0
+		}
+		return n
+	default:
+		return 0
+	}
+}

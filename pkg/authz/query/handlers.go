@@ -16,14 +16,19 @@ package authz
 
 import (
 	"context"
+	"net/http"
+	"time"
+
 	"github.com/rs/zerolog/log"
 	objecttype "github.com/warrant-dev/warrant/pkg/authz/objecttype"
 	authz "github.com/warrant-dev/warrant/pkg/authz/warrant"
-	"github.com/warrant-dev/warrant/pkg/wookie"
-	"net/http"
-
 	"github.com/warrant-dev/warrant/pkg/service"
+	"github.com/warrant-dev/warrant/pkg/wookie"
 )
+
+// syncMarkerTTL 是 syncUserRelationsOnQuery 去重护栏的窗口：同一 (org,user) 在该窗口内
+// 只会触发一次"懒同步"写（及一次缓存失效），避免每次查询都打掉该 org 的 warrant 缓存。
+const syncMarkerTTL = 24 * time.Hour
 
 func (svc QueryService) Routes() ([]service.Route, error) {
 	return []service.Route{
@@ -150,17 +155,26 @@ func syncUserRelationsOnQuery(context context.Context, svc QueryService, query Q
 	log.Ctx(context).Info().Msgf("syncUserRelationsOnQuery,uid:%s, orgId:%s", userId, orgId)
 
 	if orgId != "" {
-		_, _, err := svc.warrantSvc.Create(context, authz.CreateWarrantSpec{
-			ObjectType: objecttype.ObjectTypeOrg,
-			ObjectId:   orgId,
-			Relation:   "member",
-			Subject: &authz.SubjectSpec{
-				ObjectType: objecttype.ObjectTypeUser,
-				ObjectId:   userId,
-			},
-		})
-		if err != nil {
-			log.Ctx(context).Error().Err(err).Msgf("syncUserRelationsOnQuery: cannot create warrant  for user %s and  orgId %s", userId, orgId)
+		// 去重护栏：这条 org-member 关系是幂等的"懒同步"写。Create 是 upsert，即便关系已存在
+		// 也会触发缓存失效（INCR wv:org:{orgId}），导致该 org 桶缓存被每次查询打掉。
+		// 用一个短期 NX 标记把"同一 (org,user) 在窗口内的重复同步"挡掉，最多失效一次。
+		// 缓存未启用/Redis 异常时 SetNXMarker 返回 true，自动退回原有"每次都写"行为，不丢正确性。
+		marker := "warrant:synced:org:" + orgId + ":user:" + userId
+		if svc.cache.SetNXMarker(context, marker, syncMarkerTTL) {
+			_, _, err := svc.warrantSvc.Create(context, authz.CreateWarrantSpec{
+				ObjectType: objecttype.ObjectTypeOrg,
+				ObjectId:   orgId,
+				Relation:   "member",
+				Subject: &authz.SubjectSpec{
+					ObjectType: objecttype.ObjectTypeUser,
+					ObjectId:   userId,
+				},
+			})
+			if err != nil {
+				log.Ctx(context).Error().Err(err).Msgf("syncUserRelationsOnQuery: cannot create warrant  for user %s and  orgId %s", userId, orgId)
+			}
+		} else {
+			log.Ctx(context).Debug().Msgf("syncUserRelationsOnQuery: skip (recently synced) user %s orgId %s", userId, orgId)
 		}
 	}
 	//if imGroupIds != nil && len(imGroupIds) > 0 {

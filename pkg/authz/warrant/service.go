@@ -224,15 +224,6 @@ func copyContextForAsync(ctx context.Context) (context.Context, context.CancelFu
 // notifyAuthzChange 发送授权变更通知
 // 特殊处理：如果 workspaceApp 给 policyGroup 授权变更，需要展开 policyGroup 下所有 user member 逐个发通知
 func (svc WarrantService) notifyAuthzChange(ctx context.Context, objectType, objectId, subjectType, subjectId, relation, orgId, eventType string) {
-	log.Info().
-		Msgf("notifyAuthzChange: %v", map[string]string{
-			"objectType":  objectType,
-			"relation":    relation,
-			"subjectType": subjectType,
-			"subjectId":   subjectId,
-			"orgId":       orgId,
-			"eventType":   eventType,
-		})
 	// 只处理 workspaceApp 的 member 授权变更
 	if !event.ShouldNotify(objectType, relation) {
 		log.Info().
@@ -248,12 +239,6 @@ func (svc WarrantService) notifyAuthzChange(ctx context.Context, objectType, obj
 			Str("subjectType", subjectType).
 			Msg("skip notify authz change")
 		return
-	}
-
-	// 黑名单（denied）语义与有效权限相反：新增 denied = 撤销权限，删除 denied = 恢复权限，
-	// 因此向下游发送通知时需要反转事件类型。
-	if relation == objecttype.RelationDenied {
-		eventType = event.InvertEventType(eventType)
 	}
 
 	// 特殊处理：workspaceApp -> policyGroup 授权变更

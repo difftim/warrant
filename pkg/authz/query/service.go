@@ -24,6 +24,7 @@ import (
 	"github.com/pkg/errors"
 	objecttype "github.com/warrant-dev/warrant/pkg/authz/objecttype"
 	warrant "github.com/warrant-dev/warrant/pkg/authz/warrant"
+	"github.com/warrant-dev/warrant/pkg/cache"
 	"github.com/warrant-dev/warrant/pkg/object"
 	"github.com/warrant-dev/warrant/pkg/service"
 )
@@ -40,14 +41,16 @@ type QueryService struct {
 	objectTypeSvc objecttype.Service
 	warrantSvc    warrant.Service
 	objectSvc     object.Service
+	cache         *cache.Cache
 }
 
-func NewService(env service.Env, objectTypeSvc objecttype.Service, warrantSvc warrant.Service, objectSvc object.Service) QueryService {
+func NewService(env service.Env, objectTypeSvc objecttype.Service, warrantSvc warrant.Service, objectSvc object.Service, c *cache.Cache) QueryService {
 	return QueryService{
 		BaseService:   service.NewBaseService(env),
 		objectTypeSvc: objectTypeSvc,
 		warrantSvc:    warrantSvc,
 		objectSvc:     objectSvc,
+		cache:         c,
 	}
 }
 
