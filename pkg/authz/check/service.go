@@ -350,50 +350,10 @@ func (svc CheckService) Check(ctx context.Context, authInfo *service.AuthInfo, w
 	}
 
 	if result.Matched {
-		// deny-override（黑名单）：仅针对 workspaceApp，若 subject 为 user 且该 user 对该 app 被显式拉黑，
-		// 则即使存在正向授权也判定为未授权。
-		if warrantCheck.ObjectType == objecttype.ObjectTypeWorkspaceApp &&
-			warrantCheck.Subject != nil && warrantCheck.Subject.ObjectType == objecttype.ObjectTypeUser {
-			denied, denyErr := svc.isUserDenied(ctx, warrantCheck.ObjectId, warrantCheck.Subject.ObjectId)
-			if denyErr != nil {
-				return false, nil, false, denyErr
-			}
-			if denied {
-				return false, nil, false, nil
-			}
-		}
-
 		return true, result.DecisionPath, len(result.DecisionPath) != 1 || result.DecisionPath[0].Relation != warrantCheck.Relation, nil
 	}
 
 	return false, nil, false, nil
-}
-
-// isUserDenied 判断 user 是否被显式加入某 workspaceApp 的黑名单
-// （workspaceApp:workspaceAppId#denied@user:userId）。黑名单是 app 级的，不区分具体 operate。
-func (svc CheckService) isUserDenied(ctx context.Context, workspaceAppId string, userId string) (bool, error) {
-	if workspaceAppId == "" || userId == "" {
-		return false, nil
-	}
-
-	listParams := service.DefaultListParams(warrant.WarrantListParamParser{})
-	listParams.WithLimit(1)
-	deniedWarrants, _, _, err := svc.warrantSvc.List(
-		ctx,
-		warrant.FilterParams{
-			ObjectType:  objecttype.ObjectTypeWorkspaceApp,
-			ObjectId:    workspaceAppId,
-			Relation:    objecttype.RelationDenied,
-			SubjectType: objecttype.ObjectTypeUser,
-			SubjectId:   userId,
-		},
-		listParams,
-	)
-	if err != nil {
-		return false, err
-	}
-
-	return len(deniedWarrants) > 0, nil
 }
 
 type result struct {
