@@ -80,15 +80,28 @@ func PublishAuthzChangeEvent(ctx context.Context, event *AuthzChangeEvent) error
 }
 
 // ShouldNotify 判断是否需要发送通知
-// 只处理 workspaceApp 相关的授权变更，且 relation 必须是 member
+// 只处理 workspaceApp / policyGroup 相关的授权变更，relation 为 member 或 denied（黑名单）
 func ShouldNotify(objectType, relation string) bool {
 	if objectType != authz.ObjectTypeWorkspaceApp && objectType != authz.ObjectTypePolicyGroup {
 		return false
 	}
-	if relation != RelationMember {
+	if relation != RelationMember && relation != authz.RelationDenied {
 		return false
 	}
 	return true
+}
+
+// InvertEventType 反转事件类型（grant <-> revoke）。
+// 用于黑名单（denied）：新增 denied warrant 意味着撤销有效权限，删除则意味着恢复有效权限。
+func InvertEventType(eventType string) string {
+	switch eventType {
+	case EventTypeGrant:
+		return EventTypeRevoke
+	case EventTypeRevoke:
+		return EventTypeGrant
+	default:
+		return eventType
+	}
 }
 
 // IsSupportedSubjectType 判断是否是支持的被授权主体类型

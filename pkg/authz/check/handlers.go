@@ -139,14 +139,17 @@ func authorize4UserHandler(svc CheckService, w http.ResponseWriter, r *http.Requ
 	return errors.New("unsupported bizType:" + string(checkUserSpec.BizType))
 }
 
-func buildWarrantSpecs(checkUserSpec CheckUserSpec, orgId string, imGroupIds []string) []CheckWarrantSpec {
-	var objectId string
+// resolveResourceObjectId 计算待鉴权资源的 objectId（Resource.Id 为空时使用占位符）。
+func resolveResourceObjectId(checkUserSpec CheckUserSpec) string {
 	if checkUserSpec.Resource.Id != "" {
-		objectId = checkUserSpec.Resource.Id
-	} else {
-		//todo
-		objectId = "xxxx"
+		return checkUserSpec.Resource.Id
 	}
+	//todo
+	return "xxxx"
+}
+
+func buildWarrantSpecs(checkUserSpec CheckUserSpec, orgId string, imGroupIds []string) []CheckWarrantSpec {
+	objectId := resolveResourceObjectId(checkUserSpec)
 
 	warrantSpecs := make([]CheckWarrantSpec, 0)
 
