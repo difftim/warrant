@@ -534,8 +534,10 @@ func (repo PostgresRepository) ListWarrantApps(ctx context.Context) ([]*WarrantA
 		AND object_type = 'workspaceApp'
 		AND relation = 'member'
 	`
+	replacements := make([]interface{}, 0, 1)
 	if orgId != nil && orgId != "" {
-		query = fmt.Sprintf("%s AND org_id  in ('*','%s')", query, orgId)
+		query = fmt.Sprintf("%s AND org_id  in ('*',?)", query)
+		replacements = append(replacements, orgId)
 	}
 	query = fmt.Sprintf("%s GROUP BY object_id", query)
 
@@ -544,6 +546,7 @@ func (repo PostgresRepository) ListWarrantApps(ctx context.Context) ([]*WarrantA
 		ctx,
 		&apps,
 		query,
+		replacements...,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

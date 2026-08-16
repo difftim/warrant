@@ -175,6 +175,7 @@ type CheckConfig struct {
 	Concurrency    int           `mapstructure:"concurrency"`
 	MaxConcurrency int           `mapstructure:"maxConcurrency"`
 	Timeout        time.Duration `mapstructure:"timeout"`
+	MaxDepth       int           `mapstructure:"maxDepth"`
 }
 type GrpcConfig struct {
 	Client *GrpcClientConfig `mapstructure:"client"`
@@ -239,6 +240,7 @@ func NewConfig() WarrantConfig {
 	viper.SetDefault("check.concurrency", 4)
 	viper.SetDefault("check.maxConcurrency", 1000)
 	viper.SetDefault("check.timeout", 1*time.Minute)
+	viper.SetDefault("check.maxDepth", 100)
 	viper.SetDefault("kafka.enabled", false)
 	viper.SetDefault("kafka.clientId", "warrant")
 	viper.SetDefault("kafka.dialTimeout", 10*time.Second)

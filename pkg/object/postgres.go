@@ -205,11 +205,12 @@ func (repo PostgresRepository) List(ctx context.Context, filterOptions *FilterOp
 		WHERE
 			deleted_at IS NULL
 	`
+	replacements := []interface{}{}
 	if orgId != nil && orgId != "" {
-		query = fmt.Sprintf("%s AND org_id = '%s'", query, orgId)
+		query = fmt.Sprintf("%s AND org_id = ?", query)
+		replacements = append(replacements, orgId)
 	}
 
-	replacements := []interface{}{}
 	primaryKeyColumn := sortRegexp.ReplaceAllString(PrimarySortKey, `_$1`)
 
 	var sortByColumn string
@@ -613,16 +614,24 @@ func (repo PostgresRepository) selectPolicyGroupWarrantAppCount(ctx context.Cont
 		AND subject_type ='policyGroup'
 		AND relation ='member'
 	`
-	query = fmt.Sprintf("%s AND subject_id IN ('%s')", query, strings.Join(objectIds, "','"))
+	replacements := make([]interface{}, 0, len(objectIds)+1)
+	placeholders := make([]string, 0, len(objectIds))
+	for _, id := range objectIds {
+		placeholders = append(placeholders, "?")
+		replacements = append(replacements, id)
+	}
+	query = fmt.Sprintf("%s AND subject_id IN (%s)", query, strings.Join(placeholders, ","))
 
 	if orgId != nil && orgId != "" {
-		query = fmt.Sprintf("%s AND org_id = '%s'", query, orgId)
+		query = fmt.Sprintf("%s AND org_id = ?", query)
+		replacements = append(replacements, orgId)
 	}
 	query += " group by policy_group_id "
 	err = repo.DB.SelectContext(
 		ctx,
 		&warrantAppCounts,
 		query,
+		replacements...,
 	)
 	if err != nil {
 		return nil, errors.Wrap(err, "error selecting policy group warrant app count")
@@ -645,10 +654,17 @@ func (repo PostgresRepository) selectPolicyGroupWarrantUserCount(ctx context.Con
 		AND subject_type ='user'
 		AND relation ='member'
 	`
-	query = fmt.Sprintf("%s AND object_id IN ('%s')", query, strings.Join(objectIds, "','"))
+	replacements := make([]interface{}, 0, len(objectIds)+1)
+	placeholders := make([]string, 0, len(objectIds))
+	for _, id := range objectIds {
+		placeholders = append(placeholders, "?")
+		replacements = append(replacements, id)
+	}
+	query = fmt.Sprintf("%s AND object_id IN (%s)", query, strings.Join(placeholders, ","))
 
 	if orgId != nil && orgId != "" {
-		query = fmt.Sprintf("%s AND org_id = '%s'", query, orgId)
+		query = fmt.Sprintf("%s AND org_id = ?", query)
+		replacements = append(replacements, orgId)
 	}
 	query += " group by policy_group_id "
 
@@ -656,6 +672,7 @@ func (repo PostgresRepository) selectPolicyGroupWarrantUserCount(ctx context.Con
 		ctx,
 		&warrantUserCounts,
 		query,
+		replacements...,
 	)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error getting policy group warrant user counts for objects %v", objectIds)
