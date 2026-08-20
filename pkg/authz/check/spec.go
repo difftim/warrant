@@ -23,6 +23,11 @@ import (
 const Authorized = "Authorized"
 const NotAuthorized = "Not Authorized"
 
+// MaxCheckManyCountLimit bounds the number of warrants a single check/checkMany
+// request may carry, preventing a single request from fanning out into an
+// unbounded number of (recursive) authorization checks (DoS amplification).
+const MaxCheckManyCountLimit int = 500
+
 type CheckWarrantSpec struct {
 	ObjectType string                `json:"objectType" validate:"required,valid_object_type"`
 	ObjectId   string                `json:"objectId" validate:"required,valid_object_id"`
@@ -56,14 +61,14 @@ type CheckSpec struct {
 
 type CheckManySpec struct {
 	Op       string                `json:"op"`
-	Warrants []CheckWarrantSpec    `json:"warrants" validate:"min=1,dive"`
+	Warrants []CheckWarrantSpec    `json:"warrants" validate:"min=1,max=500,dive"`
 	Context  warrant.PolicyContext `json:"context"`
 	Debug    bool                  `json:"debug"`
 }
 
 type SessionCheckManySpec struct {
 	Op       string                    `json:"op"`
-	Warrants []CheckSessionWarrantSpec `json:"warrants" validate:"min=1,dive"`
+	Warrants []CheckSessionWarrantSpec `json:"warrants" validate:"min=1,max=500,dive"`
 	Context  warrant.PolicyContext     `json:"context"`
 	Debug    bool                      `json:"debug"`
 }

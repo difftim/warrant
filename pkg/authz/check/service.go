@@ -214,6 +214,11 @@ func (svc CheckService) CheckMany(ctx context.Context, authInfo *service.AuthInf
 	if warrantCheck.Op != "" && warrantCheck.Op != objecttype.InheritIfAllOf && warrantCheck.Op != objecttype.InheritIfAnyOf {
 		return nil, service.NewInvalidParameterError("op", "must be either anyOf or allOf")
 	}
+	// Defense-in-depth: bound the batch size regardless of caller path, so a
+	// single request can't fan out into an unbounded number of checks.
+	if len(warrantCheck.Warrants) > MaxCheckManyCountLimit {
+		return nil, service.NewInvalidParameterError("warrants", fmt.Sprintf("must not contain more than %d entries", MaxCheckManyCountLimit))
+	}
 
 	var checkResult CheckResultSpec
 	checkResult.DecisionPath = make(map[string][]warrant.WarrantSpec, 0)
@@ -378,6 +383,18 @@ func (svc CheckService) check(level int, checkPipeline *pipeline, ctx context.Co
 		log.Ctx(ctx).Debug().Msgf("canceled check[%d] [%s]", level, checkSpec)
 		return
 	default:
+		// Guard against relationship cycles / pathological graphs: bound the
+		// recursion depth so a crafted cycle can't spin CPU/DB until the timeout.
+		if svc.checkConfig.MaxDepth > 0 && level > svc.checkConfig.MaxDepth {
+			log.Ctx(ctx).Warn().Msgf("check: max depth %d exceeded at level %d for [%s], aborting traversal", svc.checkConfig.MaxDepth, level, checkSpec)
+			resultC <- result{
+				Matched:      false,
+				DecisionPath: currentPath,
+				Err:          nil,
+			}
+			return
+		}
+
 		start := time.Now()
 		defer func() {
 			log.Ctx(ctx).Debug().Msgf("exec check[%d] [%s] [%s]", level, checkSpec, time.Since(start))
